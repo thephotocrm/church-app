@@ -4,6 +4,10 @@ const API_URL = __DEV__
   ? 'http://localhost:3000/api'
   : 'https://api.yourchurch.com/api'; // TODO: update with real URL
 
+// FPC Dallas website URL (serves the live stream API and HLS proxy)
+// Update this to your deployed Replit URL
+export const STREAM_API_URL = 'https://fpc-dallas-website.replit.app'; // TODO: update with real URL
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
     ...options,
