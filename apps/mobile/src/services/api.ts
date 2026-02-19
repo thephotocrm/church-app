@@ -6,7 +6,7 @@ const API_URL = __DEV__
 
 // FPC Dallas website URL (serves the live stream API and HLS proxy)
 // Update this to your deployed Replit URL
-export const STREAM_API_URL = 'https://fpc-dallas-website.replit.app'; // TODO: update with real URL
+export const STREAM_API_URL = 'https://fpcd.life';
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
@@ -48,22 +48,22 @@ export const api = {
       headers: authHeaders(token),
     }),
 
-  // Sermons
-  getSermons: (token: string, page = 1) =>
+  // Sermons (public)
+  getSermons: (token?: string | null, page = 1) =>
     request<{ data: any[]; total: number }>(`/sermons?page=${page}`, {
-      headers: authHeaders(token),
+      ...(token ? { headers: authHeaders(token) } : {}),
     }),
 
-  // Events
-  getEvents: (token: string) =>
+  // Events (public)
+  getEvents: (token?: string | null) =>
     request<{ data: any[] }>('/events', {
-      headers: authHeaders(token),
+      ...(token ? { headers: authHeaders(token) } : {}),
     }),
 
-  // Announcements
-  getAnnouncements: (token: string) =>
+  // Announcements (public)
+  getAnnouncements: (token?: string | null) =>
     request<{ data: any[] }>('/announcements', {
-      headers: authHeaders(token),
+      ...(token ? { headers: authHeaders(token) } : {}),
     }),
 
   // Groups

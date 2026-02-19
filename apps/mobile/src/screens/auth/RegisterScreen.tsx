@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import { View, Text, Pressable, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { useAuth } from '../../contexts/AuthContext';
+import { Button, Input } from '../../components/ui';
 
 export function RegisterScreen({ navigation }: any) {
   const { register } = useAuth();
@@ -34,50 +35,50 @@ export function RegisterScreen({ navigation }: any) {
   }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Create Account</Text>
-      <TextInput
-        style={styles.input}
-        placeholder="Full Name"
-        value={name}
-        onChangeText={setName}
-      />
-      <TextInput
-        style={styles.input}
-        placeholder="Email"
-        value={email}
-        onChangeText={setEmail}
-        autoCapitalize="none"
-        keyboardType="email-address"
-      />
-      <TextInput
-        style={styles.input}
-        placeholder="Password (min 8 characters)"
-        value={password}
-        onChangeText={setPassword}
-        secureTextEntry
-      />
-      <TouchableOpacity style={styles.button} onPress={handleRegister} disabled={loading}>
-        <Text style={styles.buttonText}>{loading ? 'Creating...' : 'Create Account'}</Text>
-      </TouchableOpacity>
-      <TouchableOpacity onPress={() => navigation.navigate('Login')}>
-        <Text style={styles.link}>Already have an account? Sign In</Text>
-      </TouchableOpacity>
-    </View>
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      className="flex-1"
+    >
+      <View className="flex-1 bg-background px-6 justify-center">
+        <Text className="font-heading-bold text-3xl text-foreground text-center mb-2">
+          Create Account
+        </Text>
+        <Text className="font-body text-base text-muted-foreground text-center mb-10">
+          Join the FPCD community
+        </Text>
+
+        <Input
+          label="Full Name"
+          placeholder="John Doe"
+          value={name}
+          onChangeText={setName}
+        />
+        <Input
+          label="Email"
+          placeholder="you@example.com"
+          value={email}
+          onChangeText={setEmail}
+          autoCapitalize="none"
+          keyboardType="email-address"
+        />
+        <Input
+          label="Password"
+          placeholder="Min 8 characters"
+          value={password}
+          onChangeText={setPassword}
+          secureTextEntry
+        />
+
+        <Button onPress={handleRegister} loading={loading} className="mt-2">
+          Create Account
+        </Button>
+
+        <Pressable onPress={() => navigation.navigate('Login')} className="mt-6">
+          <Text className="font-body text-sm text-accent text-center">
+            Already have an account? Sign In
+          </Text>
+        </Pressable>
+      </View>
+    </KeyboardAvoidingView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, padding: 24, justifyContent: 'center', backgroundColor: '#fff' },
-  title: { fontSize: 28, fontWeight: 'bold', marginBottom: 32, textAlign: 'center' },
-  input: {
-    borderWidth: 1, borderColor: '#d1d5db', borderRadius: 8,
-    padding: 14, marginBottom: 16, fontSize: 16,
-  },
-  button: {
-    backgroundColor: '#2563eb', padding: 16, borderRadius: 8,
-    alignItems: 'center', marginBottom: 16,
-  },
-  buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  link: { color: '#2563eb', textAlign: 'center', fontSize: 14 },
-});

@@ -1,16 +1,19 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { Send } from 'lucide-react-native';
+import { ScreenWrapper, EmptyState } from '../../components/ui';
+import { useTheme } from '../../lib/useTheme';
 
 export function DMChatScreen({ route }: any) {
+  const { colors } = useTheme();
+
   // TODO: Phase 3 - DM conversation view
   return (
-    <View style={styles.container}>
-      <Text style={styles.placeholder}>DM chat coming in Phase 3</Text>
-    </View>
+    <ScreenWrapper>
+      <EmptyState
+        icon={<Send size={48} color={colors.mutedForeground} />}
+        title="Chat"
+        subtitle="Direct messaging coming in a future update"
+      />
+    </ScreenWrapper>
   );
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' },
-  placeholder: { fontSize: 16, color: '#9ca3af' },
-});

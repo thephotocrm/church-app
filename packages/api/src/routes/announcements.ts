@@ -1,11 +1,11 @@
 import { Router } from 'express';
-import { requireActive, requireRole } from '../middleware/auth.js';
+import { authenticate, requireRole } from '../middleware/auth.js';
 import { broadcastLimiter } from '../middleware/rateLimit.js';
 
 export const announcementsRouter = Router();
 
-// GET /api/announcements
-announcementsRouter.get('/', requireActive, async (req, res) => {
+// GET /api/announcements (public)
+announcementsRouter.get('/', async (req, res) => {
   // TODO: Phase 1 - list announcements (paginated)
   res.status(501).json({ error: 'Not implemented' });
 });
@@ -13,6 +13,7 @@ announcementsRouter.get('/', requireActive, async (req, res) => {
 // POST /api/announcements
 announcementsRouter.post(
   '/',
+  authenticate,
   requireRole('super_admin', 'admin', 'pastor'),
   broadcastLimiter,
   async (req, res) => {
@@ -22,7 +23,7 @@ announcementsRouter.post(
 );
 
 // DELETE /api/announcements/:id
-announcementsRouter.delete('/:id', requireRole('super_admin', 'admin'), async (req, res) => {
+announcementsRouter.delete('/:id', authenticate, requireRole('super_admin', 'admin'), async (req, res) => {
   // TODO: Phase 1 - delete announcement
   res.status(501).json({ error: 'Not implemented' });
 });

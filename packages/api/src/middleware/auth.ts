@@ -34,6 +34,23 @@ export function authenticate(req: Request, res: Response, next: NextFunction): v
   }
 }
 
+export function optionalAuth(req: Request, res: Response, next: NextFunction): void {
+  const header = req.headers.authorization;
+  if (!header?.startsWith('Bearer ')) {
+    next();
+    return;
+  }
+
+  try {
+    const token = header.split(' ')[1];
+    const payload = jwt.verify(token, env.JWT_SECRET) as AuthPayload;
+    req.user = payload;
+  } catch {
+    // Invalid token — treat as unauthenticated guest
+  }
+  next();
+}
+
 export function requireActive(req: Request, res: Response, next: NextFunction): void {
   if (req.user?.status !== 'active') {
     res.status(403).json({ error: 'Account not active' });

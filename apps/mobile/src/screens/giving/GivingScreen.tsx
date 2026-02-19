@@ -1,16 +1,19 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { DollarSign } from 'lucide-react-native';
+import { ScreenWrapper, EmptyState } from '../../components/ui';
+import { useTheme } from '../../lib/useTheme';
 
 export function GivingScreen() {
+  const { colors } = useTheme();
+
   // TODO: Phase 4 - Stripe checkout, donation history
   return (
-    <View style={styles.container}>
-      <Text style={styles.placeholder}>Giving coming in Phase 4</Text>
-    </View>
+    <ScreenWrapper>
+      <EmptyState
+        icon={<DollarSign size={48} color={colors.mutedForeground} />}
+        title="Giving"
+        subtitle="Online giving coming in a future update"
+      />
+    </ScreenWrapper>
   );
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f9fafb' },
-  placeholder: { fontSize: 16, color: '#9ca3af' },
-});

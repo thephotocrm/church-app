@@ -11,7 +11,7 @@ import { announcementsRouter } from './routes/announcements.js';
 import { givingRouter } from './routes/giving.js';
 import { livestreamRouter } from './routes/livestream.js';
 import { adminRouter } from './routes/admin.js';
-import { authenticate } from './middleware/auth.js';
+import { authenticate, optionalAuth } from './middleware/auth.js';
 
 const app = express();
 
@@ -30,12 +30,12 @@ app.use('/api/auth', authRouter);
 
 // Protected routes
 app.use('/api/users', authenticate, usersRouter);
-app.use('/api/sermons', authenticate, sermonsRouter);
-app.use('/api/events', authenticate, eventsRouter);
+app.use('/api/sermons', optionalAuth, sermonsRouter);
+app.use('/api/events', optionalAuth, eventsRouter);
 app.use('/api/groups', authenticate, groupsRouter);
-app.use('/api/announcements', authenticate, announcementsRouter);
+app.use('/api/announcements', optionalAuth, announcementsRouter);
 app.use('/api/giving', authenticate, givingRouter);
-app.use('/api/livestream', authenticate, livestreamRouter);
+app.use('/api/livestream', optionalAuth, livestreamRouter);
 app.use('/api/admin', authenticate, adminRouter);
 
 app.listen(env.PORT, () => {

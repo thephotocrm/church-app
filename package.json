@@ -14,6 +14,10 @@
     "admin:build": "npm run build --workspace=apps/admin",
     "db:migrate": "npm run migrate --workspace=packages/api"
   },
+  "overrides": {
+    "react": "19.1.0",
+    "react-dom": "19.1.0"
+  },
   "engines": {
     "node": ">=20.0.0"
   }
