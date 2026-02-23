@@ -149,6 +149,9 @@ export function BibleScreen() {
       setError(null);
       try {
         const data = await getChapterContent(chapter.id);
+        if (!data || !data.content) {
+          throw new Error('Chapter content is empty');
+        }
         setChapterData(data);
         setView('reading');
         if (selectedBook) {
@@ -159,7 +162,8 @@ export function BibleScreen() {
           });
         }
         scrollRef.current?.scrollTo({ y: 0, animated: false });
-      } catch {
+      } catch (err) {
+        console.error('handleChapterPress error:', err);
         setError('Unable to load this chapter. Please try again.');
       } finally {
         setLoading(false);
@@ -174,6 +178,9 @@ export function BibleScreen() {
       setError(null);
       try {
         const data = await getChapterContent(chapterId);
+        if (!data || !data.content) {
+          throw new Error('Chapter content is empty');
+        }
         setChapterData(data);
         if (selectedBook) {
           setLastRead({
@@ -214,6 +221,9 @@ export function BibleScreen() {
       setChapters(chapData.filter((c) => c.number !== 'intro'));
       // Then load the chapter content
       const content = await getChapterContent(lastRead.chapterId);
+      if (!content || !content.content) {
+        throw new Error('Chapter content is empty');
+      }
       setChapterData(content);
       setView('reading');
       scrollRef.current?.scrollTo({ y: 0, animated: false });
@@ -223,6 +233,19 @@ export function BibleScreen() {
       setLoading(false);
     }
   }, [lastRead]);
+
+  // ── Pre-compute reading view data (must be above all returns) ──
+  const verseParts = useMemo(
+    () => parseVerses(chapterData?.content ?? ''),
+    [chapterData?.content],
+  );
+
+  const prevRef = chapterData?.previous
+    ? `${selectedBook?.name ?? ''} ${chapterData.previous.number}`
+    : null;
+  const nextRef = chapterData?.next
+    ? `${selectedBook?.name ?? ''} ${chapterData.next.number}`
+    : null;
 
   // ── Shared header ──
   function Header({
@@ -731,18 +754,6 @@ export function BibleScreen() {
   // ══════════════════════════════════════════════════════════
   // READING VIEW
   // ══════════════════════════════════════════════════════════
-  const verseParts = useMemo(
-    () => parseVerses(chapterData?.content ?? ''),
-    [chapterData?.content],
-  );
-
-  // Build prev/next labels from chapter data
-  const prevRef = chapterData?.previous
-    ? `${selectedBook?.name ?? ''} ${chapterData.previous.number}`
-    : null;
-  const nextRef = chapterData?.next
-    ? `${selectedBook?.name ?? ''} ${chapterData.next.number}`
-    : null;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -872,7 +883,7 @@ export function BibleScreen() {
           >
             {chapterData?.previous ? (
               <Pressable
-                onPress={() => handlePrevNext(chapterData.previous!.id)}
+                onPress={() => chapterData?.previous?.id && handlePrevNext(chapterData.previous.id)}
                 style={({ pressed }) => ({
                   flex: 1,
                   flexDirection: 'row',
@@ -923,7 +934,7 @@ export function BibleScreen() {
 
             {chapterData?.next ? (
               <Pressable
-                onPress={() => handlePrevNext(chapterData.next!.id)}
+                onPress={() => chapterData?.next?.id && handlePrevNext(chapterData.next.id)}
                 style={({ pressed }) => ({
                   flex: 1,
                   flexDirection: 'row',

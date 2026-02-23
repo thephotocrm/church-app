@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,26 +6,173 @@ import {
   ScrollView,
   Image,
   Platform,
+  ActivityIndicator,
+  Alert,
+  ActionSheetIOS,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ArrowLeft, BellOff, LogOut, Users } from 'lucide-react-native';
+import { ArrowLeft, BellOff, LogOut, Users, Megaphone, MessageCircle } from 'lucide-react-native';
 import { useTheme } from '../../lib/useTheme';
-
-// ── Sample members ─────────────────────────────────────────
-const SAMPLE_MEMBERS = [
-  { id: '1', name: 'Pastor Johnson', role: 'Leader', image: 'https://i.pravatar.cc/100?img=11' },
-  { id: '2', name: 'Sister Williams', role: 'Co-leader', image: 'https://i.pravatar.cc/100?img=5' },
-  { id: '3', name: 'Deacon Brown', role: 'Member', image: 'https://i.pravatar.cc/100?img=12' },
-  { id: '4', name: 'Mary Taylor', role: 'Member', image: 'https://i.pravatar.cc/100?img=9' },
-  { id: '5', name: 'James Wilson', role: 'Member', image: 'https://i.pravatar.cc/100?img=8' },
-  { id: '6', name: 'Ruth Davis', role: 'Member', image: 'https://i.pravatar.cc/100?img=16' },
-];
+import { useAuth } from '../../contexts/AuthContext';
+import { api } from '../../services/api';
+import type { GroupMemberResponse } from '../../types/groups';
 
 // ── Component ──────────────────────────────────────────────
 export function GroupDetailScreen({ route, navigation }: any) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
+  const { token, user } = useAuth();
   const group = route.params?.group;
+
+  const [members, setMembers] = useState<GroupMemberResponse[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [leaving, setLeaving] = useState(false);
+
+  // Determine if current user is a platform admin or group admin
+  const isPlatformAdmin = user?.role === 'admin';
+  const currentUserGroupMember = members.find((gm) => gm.memberId === user?.id);
+  const isGroupAdmin = currentUserGroupMember?.role === 'admin';
+  const canManageMembers = isPlatformAdmin || isGroupAdmin;
+
+  useEffect(() => {
+    if (!token || !group?.id) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const membersList = await api.getGroupMembers(token, group.id);
+        if (!cancelled) setMembers(membersList);
+      } catch {
+        // fail silently
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [token, group?.id]);
+
+  const handleLeave = () => {
+    Alert.alert(
+      'Leave Group',
+      `Are you sure you want to leave "${group?.name}"?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Leave',
+          style: 'destructive',
+          onPress: async () => {
+            if (!token || !group?.id) return;
+            setLeaving(true);
+            try {
+              await api.leaveGroup(token, group.id);
+              navigation.popToTop();
+            } catch (err: any) {
+              Alert.alert('Error', err.message || 'Failed to leave group');
+              setLeaving(false);
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const handleMemberAction = (gm: GroupMemberResponse) => {
+    if (!canManageMembers) return;
+
+    // Cannot act on yourself
+    if (gm.memberId === user?.id) return;
+
+    // Non-platform-admins cannot modify other admins
+    if (gm.role === 'admin' && !isPlatformAdmin) return;
+
+    const isTargetAdmin = gm.role === 'admin';
+    const memberName = `${gm.member.firstName} ${gm.member.lastName}`;
+
+    const options: string[] = [];
+    const actions: (() => void)[] = [];
+
+    if (isTargetAdmin) {
+      options.push('Remove Admin');
+      actions.push(() => handleRoleChange(gm, 'member'));
+    } else {
+      options.push('Make Admin');
+      actions.push(() => handleRoleChange(gm, 'admin'));
+    }
+
+    options.push('Remove from Group');
+    actions.push(() => handleRemoveMember(gm));
+
+    options.push('Cancel');
+
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options,
+          cancelButtonIndex: options.length - 1,
+          destructiveButtonIndex: options.length - 2, // "Remove from Group"
+          title: memberName,
+        },
+        (buttonIndex) => {
+          if (buttonIndex < actions.length) {
+            actions[buttonIndex]();
+          }
+        },
+      );
+    } else {
+      // Android fallback using Alert
+      Alert.alert(
+        memberName,
+        'Choose an action',
+        [
+          ...actions.map((action, i) => ({
+            text: options[i],
+            onPress: action,
+            style: (options[i] === 'Remove from Group' ? 'destructive' : 'default') as 'destructive' | 'default',
+          })),
+          { text: 'Cancel', style: 'cancel' as const },
+        ],
+      );
+    }
+  };
+
+  const handleRoleChange = async (gm: GroupMemberResponse, newRole: 'admin' | 'member') => {
+    if (!token || !group?.id) return;
+    try {
+      await api.updateGroupMemberRole(token, group.id, gm.memberId, newRole);
+      setMembers((prev) =>
+        prev.map((m) => (m.id === gm.id ? { ...m, role: newRole } : m)),
+      );
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to update role');
+    }
+  };
+
+  const handleRemoveMember = (gm: GroupMemberResponse) => {
+    const memberName = `${gm.member.firstName} ${gm.member.lastName}`;
+    Alert.alert(
+      'Remove Member',
+      `Remove ${memberName} from "${group?.name}"?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            if (!token || !group?.id) return;
+            try {
+              await api.removeGroupMember(token, group.id, gm.memberId);
+              setMembers((prev) => prev.filter((m) => m.id !== gm.id));
+            } catch (err: any) {
+              Alert.alert('Error', err.message || 'Failed to remove member');
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const isAnnouncement = group?.type === 'announcement';
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -33,24 +180,19 @@ export function GroupDetailScreen({ route, navigation }: any) {
         contentContainerStyle={{ paddingBottom: insets.bottom + 32 }}
         showsVerticalScrollIndicator={false}
       >
-        {/* ── Hero image ── */}
-        <View style={{ height: 220, position: 'relative' }}>
-          <Image
-            source={{ uri: group?.image ?? 'https://images.unsplash.com/photo-1529070538774-1795d8de2dfe?w=800&q=80' }}
-            style={{ width: '100%', height: '100%' }}
-            resizeMode="cover"
-          />
-          {/* Gradient overlay */}
-          <View
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              right: 0,
-              height: 100,
-              backgroundColor: 'rgba(0,0,0,0.3)',
-            }}
-          />
+        {/* ── Hero ── */}
+        <View
+          style={{
+            height: 220,
+            position: 'relative',
+            backgroundColor: colors.primary,
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <Text style={{ fontFamily: 'PlayfairDisplay_700Bold', fontSize: 72, color: colors.accent }}>
+            {group?.name?.charAt(0) ?? 'G'}
+          </Text>
 
           {/* Back button */}
           <Pressable
@@ -85,18 +227,39 @@ export function GroupDetailScreen({ route, navigation }: any) {
             {group?.name ?? 'Group'}
           </Text>
 
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
-            <Users size={14} color={colors.accent} />
-            <Text
-              style={{
-                fontFamily: 'OpenSans_600SemiBold',
-                fontSize: 13,
-                color: colors.mutedForeground,
-                marginLeft: 6,
-              }}
-            >
-              {group?.members ?? 0} members
-            </Text>
+          {/* Group type + member count */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              {isAnnouncement ? (
+                <Megaphone size={14} color={colors.accent} />
+              ) : (
+                <MessageCircle size={14} color={colors.accent} />
+              )}
+              <Text
+                style={{
+                  fontFamily: 'OpenSans_600SemiBold',
+                  fontSize: 13,
+                  color: colors.mutedForeground,
+                  marginLeft: 5,
+                }}
+              >
+                {isAnnouncement ? 'Announcement' : 'Chat Group'}
+              </Text>
+            </View>
+
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Users size={14} color={colors.accent} />
+              <Text
+                style={{
+                  fontFamily: 'OpenSans_600SemiBold',
+                  fontSize: 13,
+                  color: colors.mutedForeground,
+                  marginLeft: 5,
+                }}
+              >
+                {loading ? '...' : `${members.length} members`}
+              </Text>
+            </View>
           </View>
 
           <Text
@@ -147,39 +310,49 @@ export function GroupDetailScreen({ route, navigation }: any) {
               </Text>
             </Pressable>
 
-            <Pressable
-              style={({ pressed }) => ({
-                flexDirection: 'row',
-                alignItems: 'center',
-                backgroundColor: pressed ? colors.muted : colors.card,
-                borderRadius: 14,
-                borderWidth: 1,
-                borderColor: colors.border,
-                paddingVertical: 14,
-                paddingHorizontal: 16,
-                ...Platform.select({
-                  ios: {
-                    shadowColor: '#000',
-                    shadowOffset: { width: 0, height: 1 },
-                    shadowOpacity: 0.04,
-                    shadowRadius: 3,
-                  },
-                  android: { elevation: 1 },
-                }),
-              })}
-            >
-              <LogOut size={18} color={colors.destructive} />
-              <Text
-                style={{
-                  fontFamily: 'OpenSans_600SemiBold',
-                  fontSize: 15,
-                  color: colors.destructive,
-                  marginLeft: 12,
-                }}
+            {/* Hide Leave Group for default groups */}
+            {!group?.isDefault && (
+              <Pressable
+                onPress={handleLeave}
+                disabled={leaving}
+                style={({ pressed }) => ({
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  backgroundColor: pressed ? colors.muted : colors.card,
+                  borderRadius: 14,
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                  paddingVertical: 14,
+                  paddingHorizontal: 16,
+                  opacity: leaving ? 0.5 : 1,
+                  ...Platform.select({
+                    ios: {
+                      shadowColor: '#000',
+                      shadowOffset: { width: 0, height: 1 },
+                      shadowOpacity: 0.04,
+                      shadowRadius: 3,
+                    },
+                    android: { elevation: 1 },
+                  }),
+                })}
               >
-                Leave Group
-              </Text>
-            </Pressable>
+                {leaving ? (
+                  <ActivityIndicator size="small" color={colors.destructive} />
+                ) : (
+                  <LogOut size={18} color={colors.destructive} />
+                )}
+                <Text
+                  style={{
+                    fontFamily: 'OpenSans_600SemiBold',
+                    fontSize: 15,
+                    color: colors.destructive,
+                    marginLeft: 12,
+                  }}
+                >
+                  Leave Group
+                </Text>
+              </Pressable>
+            )}
           </View>
 
           {/* ── Members ── */}
@@ -197,50 +370,99 @@ export function GroupDetailScreen({ route, navigation }: any) {
             Members
           </Text>
 
-          {SAMPLE_MEMBERS.map((member) => (
-            <View
-              key={member.id}
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                paddingVertical: 10,
-                borderBottomWidth: 1,
-                borderBottomColor: colors.border,
-              }}
-            >
-              <Image
-                source={{ uri: member.image }}
+          {loading ? (
+            <ActivityIndicator size="small" color={colors.accent} style={{ paddingVertical: 20 }} />
+          ) : members.length === 0 ? (
+            <Text style={{ fontFamily: 'OpenSans_400Regular', fontSize: 14, color: colors.mutedForeground, textAlign: 'center', paddingVertical: 20 }}>
+              No members found.
+            </Text>
+          ) : (
+            members.map((gm) => (
+              <Pressable
+                key={gm.id}
+                onLongPress={() => handleMemberAction(gm)}
+                onPress={() => canManageMembers && gm.memberId !== user?.id ? handleMemberAction(gm) : undefined}
                 style={{
-                  width: 40,
-                  height: 40,
-                  borderRadius: 20,
-                  backgroundColor: colors.muted,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  paddingVertical: 10,
+                  borderBottomWidth: 1,
+                  borderBottomColor: colors.border,
                 }}
-              />
-              <View style={{ flex: 1, marginLeft: 12 }}>
-                <Text
-                  style={{
-                    fontFamily: 'OpenSans_600SemiBold',
-                    fontSize: 15,
-                    color: colors.foreground,
-                  }}
-                >
-                  {member.name}
-                </Text>
-                <Text
-                  style={{
-                    fontFamily: 'OpenSans_400Regular',
-                    fontSize: 12,
-                    color: member.role === 'Leader' || member.role === 'Co-leader'
-                      ? colors.accent
-                      : colors.mutedForeground,
-                  }}
-                >
-                  {member.role}
-                </Text>
-              </View>
-            </View>
-          ))}
+              >
+                {gm.member.photoUrl ? (
+                  <Image
+                    source={{ uri: gm.member.photoUrl }}
+                    style={{
+                      width: 40,
+                      height: 40,
+                      borderRadius: 20,
+                      backgroundColor: colors.muted,
+                    }}
+                  />
+                ) : (
+                  <View
+                    style={{
+                      width: 40,
+                      height: 40,
+                      borderRadius: 20,
+                      backgroundColor: colors.accent,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <Text style={{ fontFamily: 'OpenSans_700Bold', fontSize: 16, color: '#0f1729' }}>
+                      {gm.member.firstName.charAt(0)}
+                    </Text>
+                  </View>
+                )}
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Text
+                      style={{
+                        fontFamily: 'OpenSans_600SemiBold',
+                        fontSize: 15,
+                        color: colors.foreground,
+                      }}
+                    >
+                      {gm.member.firstName} {gm.member.lastName}
+                    </Text>
+                    {gm.role === 'admin' && (
+                      <View
+                        style={{
+                          backgroundColor: colors.accent,
+                          borderRadius: 8,
+                          paddingHorizontal: 8,
+                          paddingVertical: 2,
+                        }}
+                      >
+                        <Text
+                          style={{
+                            fontFamily: 'OpenSans_700Bold',
+                            fontSize: 10,
+                            color: '#0f1729',
+                            textTransform: 'uppercase',
+                            letterSpacing: 0.5,
+                          }}
+                        >
+                          Admin
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text
+                    style={{
+                      fontFamily: 'OpenSans_400Regular',
+                      fontSize: 12,
+                      color: colors.mutedForeground,
+                    }}
+                  >
+                    {gm.role === 'admin' ? 'Group Admin' : 'Member'}
+                  </Text>
+                </View>
+              </Pressable>
+            ))
+          )}
         </View>
       </ScrollView>
     </View>

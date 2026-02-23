@@ -1,19 +1,32 @@
 // Shared types used by both API and mobile app
 
-export type GlobalRole = 'super_admin' | 'admin' | 'pastor' | 'staff' | 'member';
-export type GroupRole = 'group_leader' | 'moderator' | 'group_member';
+// Platform roles (in members table on backend)
+export type MemberRole = 'admin' | 'group_admin' | 'member' | 'guest';
+// Group-level roles (in group_members table on backend)
+export type GroupMemberRole = 'admin' | 'member';
+
+/** @deprecated Use MemberRole instead */
+export type GlobalRole = MemberRole;
+/** @deprecated Use GroupMemberRole instead */
+export type GroupRole = GroupMemberRole;
+
 export type UserStatus = 'pending' | 'active' | 'suspended';
 export type LivestreamProvider = 'youtube' | 'custom';
 
 export interface User {
   id: string;
   name: string;
+  firstName?: string;
+  lastName?: string;
   email: string;
   phone?: string;
   avatarUrl?: string;
+  photoUrl?: string | null;
   emailVerified: boolean;
   status: UserStatus;
-  globalRole: GlobalRole;
+  role: MemberRole;
+  /** @deprecated Use role instead */
+  globalRole?: MemberRole;
   createdAt: string;
 }
 
@@ -38,16 +51,42 @@ export interface Sermon {
   createdAt: string;
 }
 
+export type EventCategory = 'worship' | 'fellowship' | 'outreach' | 'youth' | 'prayer' | 'general';
+export type EventStatus = 'draft' | 'published' | 'cancelled';
+export type RsvpStatus = 'attending' | 'maybe' | 'declined';
+
 export interface Event {
   id: string;
   title: string;
   description?: string;
+  startDate: string;
+  endDate?: string;
+  allDay: boolean;
   location?: string;
-  startsAt: string;
-  endsAt?: string;
   imageUrl?: string;
-  rsvpEnabled: boolean;
+  featured: boolean;
+  category: EventCategory;
+  status: EventStatus;
+  recurrenceRule?: string;
+  recurrenceEndDate?: string;
+  parentEventId?: string;
   createdAt: string;
+  updatedAt: string;
+}
+
+export interface EventRsvp {
+  id: string;
+  eventId: string;
+  memberId: string;
+  status: RsvpStatus;
+  createdAt: string;
+}
+
+/** Event detail response including RSVP info */
+export interface EventDetail extends Event {
+  rsvpCount: { attending: number; maybe: number; declined: number };
+  groups?: { id: string; name: string; description?: string | null }[];
+  myRsvp?: EventRsvp | null;
 }
 
 export interface Announcement {

@@ -1,6 +1,7 @@
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { getFocusedRouteNameFromRoute } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import { HomeScreen } from '../screens/home/HomeScreen';
 import { EventsScreen } from '../screens/events/EventsScreen';
@@ -20,13 +21,14 @@ import { MoreMenuScreen } from '../screens/more/MoreMenuScreen';
 import { BibleScreen } from '../screens/bible/BibleScreen';
 import { LocationScreen } from '../screens/location/LocationScreen';
 import { PrayerRequestScreen } from '../screens/prayer/PrayerRequestScreen';
+import { ConnectScreen } from '../screens/connect/ConnectScreen';
 import { CustomTabBar } from '../components/ui/CustomTabBar';
 import { useTheme } from '../lib/useTheme';
 
 const Tab = createBottomTabNavigator();
 const HomeStack = createNativeStackNavigator();
 const EventsStack = createNativeStackNavigator();
-const WatchStack = createNativeStackNavigator();
+const GiveStack = createNativeStackNavigator();
 const GroupsStack = createNativeStackNavigator();
 const MoreStack = createNativeStackNavigator();
 
@@ -52,6 +54,7 @@ function HomeStackScreen() {
       <HomeStack.Screen name="Bible" component={BibleScreen} />
       <HomeStack.Screen name="Location" component={LocationScreen} options={{ title: 'Our Location' }} />
       <HomeStack.Screen name="PrayerRequest" component={PrayerRequestScreen} options={{ title: 'Prayer Request' }} />
+      <HomeStack.Screen name="Connect" component={ConnectScreen} options={{ title: 'Connect Nights' }} />
     </HomeStack.Navigator>
   );
 }
@@ -74,10 +77,10 @@ function EventsStackScreen() {
   );
 }
 
-function WatchStackScreen() {
+function GiveStackScreen() {
   const { colors } = useTheme();
   return (
-    <WatchStack.Navigator
+    <GiveStack.Navigator
       screenOptions={{
         headerStyle: { backgroundColor: colors.card },
         headerTintColor: colors.foreground,
@@ -85,8 +88,8 @@ function WatchStackScreen() {
         headerShadowVisible: false,
       }}
     >
-      <WatchStack.Screen name="WatchScreen" component={WatchScreen} options={{ title: 'Watch' }} />
-    </WatchStack.Navigator>
+      <GiveStack.Screen name="GivingScreen" component={GivingScreen} options={{ headerShown: false }} />
+    </GiveStack.Navigator>
   );
 }
 
@@ -121,12 +124,14 @@ function MoreStackScreen() {
         headerShadowVisible: false,
       }}
     >
-      <MoreStack.Screen name="MoreMenu" component={MoreMenuScreen} options={{ title: 'More' }} />
+      <MoreStack.Screen name="MoreMenu" component={MoreMenuScreen} options={{ headerShown: false }} />
       <MoreStack.Screen name="Bible" component={BibleScreen} />
       <MoreStack.Screen name="PrayerRequest" component={PrayerRequestScreen} options={{ title: 'Prayer Request' }} />
       <MoreStack.Screen name="Location" component={LocationScreen} options={{ title: 'Our Location' }} />
+      <MoreStack.Screen name="Connect" component={ConnectScreen} options={{ title: 'Connect Nights' }} />
       <MoreStack.Screen name="Announcements" component={AnnouncementsScreen} />
-      <MoreStack.Screen name="Giving" component={GivingScreen} />
+      <MoreStack.Screen name="Giving" component={GivingScreen} options={{ headerShown: false }} />
+      <MoreStack.Screen name="Watch" component={WatchScreen} options={{ title: 'Watch' }} />
       <MoreStack.Screen name="ProfileScreen" component={ProfileScreen} options={{ title: 'Profile' }} />
       <MoreStack.Screen name="DMList" component={DMListScreen} options={{ title: 'Messages' }} />
       <MoreStack.Screen name="DMChat" component={DMChatScreen} options={{ title: 'Message' }} />
@@ -144,8 +149,18 @@ export function MainTabs() {
     >
       <Tab.Screen name="Home" component={HomeStackScreen} />
       <Tab.Screen name="Events" component={EventsStackScreen} />
-      <Tab.Screen name="Watch" component={WatchStackScreen} />
-      <Tab.Screen name="Groups" component={GroupsStackScreen} />
+      <Tab.Screen name="Give" component={GiveStackScreen} />
+      <Tab.Screen
+        name="Groups"
+        component={GroupsStackScreen}
+        options={({ route }) => {
+          const routeName = getFocusedRouteNameFromRoute(route) ?? 'GroupsList';
+          const hideTabBar = routeName === 'GroupChat' || routeName === 'GroupDetail';
+          return {
+            tabBarStyle: hideTabBar ? { display: 'none' as const } : undefined,
+          };
+        }}
+      />
       <Tab.Screen name="More" component={MoreStackScreen} />
     </Tab.Navigator>
   );

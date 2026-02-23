@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,135 +7,150 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ArrowLeft, Info, Send } from 'lucide-react-native';
+import { ArrowLeft, Info, Send, VolumeX } from 'lucide-react-native';
 import { useTheme } from '../../lib/useTheme';
+import { useAuth } from '../../contexts/AuthContext';
+import { api } from '../../services/api';
+import { useGroupChat } from '../../hooks/useGroupChat';
+import type { ChatMessageResponse, GroupMemberResponse } from '../../types/groups';
 
-// ── Types ──────────────────────────────────────────────────
-interface ChatMessage {
-  id: string;
-  senderId: string;
-  senderName: string;
-  content: string;
-  timestamp: string;
-  isMe: boolean;
+// ── Helpers ─────────────────────────────────────────────────
+function formatTime(dateStr: string): string {
+  const d = new Date(dateStr);
+  return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }
 
-// ── Sample data ────────────────────────────────────────────
-const SAMPLE_MESSAGES: ChatMessage[] = [
-  {
-    id: '1',
-    senderId: 'u1',
-    senderName: 'Pastor Johnson',
-    content: 'Good morning everyone! Hope you all had a blessed week.',
-    timestamp: '9:00 AM',
-    isMe: false,
-  },
-  {
-    id: '2',
-    senderId: 'u2',
-    senderName: 'Sister Williams',
-    content: 'Good morning Pastor! Ready for tonight\'s study.',
-    timestamp: '9:05 AM',
-    isMe: false,
-  },
-  {
-    id: '3',
-    senderId: 'me',
-    senderName: 'You',
-    content: 'Morning! Can\'t wait. I\'ve been reading ahead in Romans 8.',
-    timestamp: '9:12 AM',
-    isMe: true,
-  },
-  {
-    id: '4',
-    senderId: 'u1',
-    senderName: 'Pastor Johnson',
-    content: 'That\'s wonderful! Romans 8 is one of the most powerful chapters. We\'ll be diving deep into verses 28-39 tonight.',
-    timestamp: '9:15 AM',
-    isMe: false,
-  },
-  {
-    id: '5',
-    senderId: 'u3',
-    senderName: 'Deacon Brown',
-    content: 'Will there be refreshments tonight?',
-    timestamp: '10:30 AM',
-    isMe: false,
-  },
-  {
-    id: '6',
-    senderId: 'u2',
-    senderName: 'Sister Williams',
-    content: 'I\'m bringing my famous lemon pound cake!',
-    timestamp: '10:32 AM',
-    isMe: false,
-  },
-  {
-    id: '7',
-    senderId: 'me',
-    senderName: 'You',
-    content: 'Sister Williams your pound cake is the best! See everyone tonight.',
-    timestamp: '10:45 AM',
-    isMe: true,
-  },
-  {
-    id: '8',
-    senderId: 'u1',
-    senderName: 'Pastor Johnson',
-    content: 'Reminder: we start at 7 PM sharp. Please bring your Bibles and notebooks.',
-    timestamp: '3:00 PM',
-    isMe: false,
-  },
-  {
-    id: '9',
-    senderId: 'u3',
-    senderName: 'Deacon Brown',
-    content: 'I\'ll be there early to help set up the chairs.',
-    timestamp: '3:15 PM',
-    isMe: false,
-  },
-  {
-    id: '10',
-    senderId: 'me',
-    senderName: 'You',
-    content: 'See everyone Tuesday! Romans 8 this week.',
-    timestamp: '4:00 PM',
-    isMe: true,
-  },
-];
+function formatDateLabel(dateStr: string): string {
+  const d = new Date(dateStr);
+  const now = new Date();
+  const isToday = d.toDateString() === now.toDateString();
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const isYesterday = d.toDateString() === yesterday.toDateString();
+  if (isToday) return 'Today';
+  if (isYesterday) return 'Yesterday';
+  return d.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' });
+}
 
-// Group consecutive messages from same sender
-function shouldShowSender(messages: ChatMessage[], index: number): boolean {
-  if (index === messages.length - 1) return true; // FlatList is inverted, so last = top
-  const current = messages[index];
-  const next = messages[index + 1]; // next in array = previous visually (inverted)
-  return current.senderId !== next.senderId;
+// Group consecutive messages from same sender (inverted list)
+function shouldShowSender(messages: ChatMessageResponse[], index: number, userId: string | undefined): boolean {
+  if (messages[index].memberId === userId) return false; // Never show sender for own messages
+  if (index === messages.length - 1) return true; // Top of list (inverted)
+  return messages[index].memberId !== messages[index + 1].memberId;
 }
 
 // ── Component ──────────────────────────────────────────────
 export function GroupChatScreen({ route, navigation }: any) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
+  const { token, user } = useAuth();
   const [text, setText] = useState('');
+  const [loadingHistory, setLoadingHistory] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const flatListRef = useRef<FlatList>(null);
+
   const group = route.params?.group;
+  const groupId = group?.id;
 
-  const invertedMessages = [...SAMPLE_MESSAGES].reverse();
+  // Check if user can post in this group
+  const isAnnouncement = group?.type === 'announcement';
+  const isPlatformAdmin = user?.role === 'admin';
+  const [userGroupRole, setUserGroupRole] = useState<'admin' | 'member' | null>(null);
 
-  const renderMessage = ({ item, index }: { item: ChatMessage; index: number }) => {
-    const showSender = shouldShowSender(invertedMessages, index);
+  useEffect(() => {
+    if (!token || !groupId || !isAnnouncement) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const members = await api.getGroupMembers(token, groupId);
+        const me = members.find((gm: GroupMemberResponse) => gm.memberId === user?.id);
+        if (!cancelled) setUserGroupRole(me?.role ?? 'member');
+      } catch {
+        if (!cancelled) setUserGroupRole('member');
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [token, groupId, isAnnouncement, user?.id]);
+
+  const canPost = !isAnnouncement || isPlatformAdmin || userGroupRole === 'admin';
+
+  // Load initial message history
+  const [initialMessages, setInitialMessages] = useState<ChatMessageResponse[]>([]);
+
+  useEffect(() => {
+    if (!token || !groupId) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const msgs = await api.getGroupMessages(token, groupId, 50);
+        if (cancelled) return;
+        setInitialMessages(msgs);
+        setHasMore(msgs.length >= 50);
+      } catch {
+        // fail silently
+      } finally {
+        if (!cancelled) setLoadingHistory(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [token, groupId]);
+
+  // WebSocket hook — only init after history loads
+  const { messages, sendMessage: wsSend, isConnected, setMessages } = useGroupChat({
+    groupId,
+    token: token!,
+    initialMessages,
+  });
+
+  // Inverted messages (newest first for FlatList inverted)
+  const invertedMessages = [...messages].reverse();
+
+  const handleSend = () => {
+    const content = text.trim();
+    if (!content) return;
+    wsSend(content);
+    setText('');
+  };
+
+  const loadOlderMessages = useCallback(async () => {
+    if (!token || !groupId || loadingMore || !hasMore || messages.length === 0) return;
+    setLoadingMore(true);
+    try {
+      const oldest = messages[0]; // earliest message
+      const olderMsgs = await api.getGroupMessages(token, groupId, 50, oldest.id);
+      if (olderMsgs.length > 0) {
+        setMessages((prev) => [...olderMsgs, ...prev]);
+      }
+      setHasMore(olderMsgs.length >= 50);
+    } catch {
+      // fail silently
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [token, groupId, loadingMore, hasMore, messages, setMessages]);
+
+  const renderMessage = ({ item, index }: { item: ChatMessageResponse; index: number }) => {
+    const isMe = item.memberId === user?.id;
+    const showSender = shouldShowSender(invertedMessages, index, user?.id);
 
     return (
       <View
         style={{
-          alignItems: item.isMe ? 'flex-end' : 'flex-start',
+          alignItems: isMe ? 'flex-end' : 'flex-start',
           marginBottom: showSender ? 12 : 3,
           paddingHorizontal: 16,
         }}
       >
         {/* Sender name */}
-        {showSender && !item.isMe && (
+        {showSender && !isMe && (
           <Text
             style={{
               fontFamily: 'OpenSans_600SemiBold',
@@ -145,7 +160,7 @@ export function GroupChatScreen({ route, navigation }: any) {
               marginLeft: 4,
             }}
           >
-            {item.senderName}
+            {item.member?.firstName ?? 'Unknown'} {item.member?.lastName ?? ''}
           </Text>
         )}
 
@@ -153,13 +168,13 @@ export function GroupChatScreen({ route, navigation }: any) {
         <View
           style={{
             maxWidth: '78%',
-            backgroundColor: item.isMe ? colors.accent : colors.card,
+            backgroundColor: isMe ? colors.accent : colors.card,
             borderRadius: 18,
-            borderTopLeftRadius: !item.isMe ? 4 : 18,
-            borderTopRightRadius: item.isMe ? 4 : 18,
+            borderTopLeftRadius: !isMe ? 4 : 18,
+            borderTopRightRadius: isMe ? 4 : 18,
             paddingHorizontal: 14,
             paddingVertical: 10,
-            borderWidth: item.isMe ? 0 : 1,
+            borderWidth: isMe ? 0 : 1,
             borderColor: colors.border,
           }}
         >
@@ -167,7 +182,7 @@ export function GroupChatScreen({ route, navigation }: any) {
             style={{
               fontFamily: 'OpenSans_400Regular',
               fontSize: 15,
-              color: item.isMe ? '#0f1729' : colors.foreground,
+              color: isMe ? '#0f1729' : colors.foreground,
               lineHeight: 21,
             }}
           >
@@ -177,17 +192,19 @@ export function GroupChatScreen({ route, navigation }: any) {
             style={{
               fontFamily: 'OpenSans_400Regular',
               fontSize: 10,
-              color: item.isMe ? 'rgba(15,23,41,0.5)' : colors.mutedForeground,
+              color: isMe ? 'rgba(15,23,41,0.5)' : colors.mutedForeground,
               marginTop: 4,
               alignSelf: 'flex-end',
             }}
           >
-            {item.timestamp}
+            {formatTime(item.createdAt)}
           </Text>
         </View>
       </View>
     );
   };
+
+  const memberCount = group?.memberCount ?? group?.members ?? 0;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -221,15 +238,20 @@ export function GroupChatScreen({ route, navigation }: any) {
           >
             {group?.name ?? 'Group Chat'}
           </Text>
-          <Text
-            style={{
-              fontFamily: 'OpenSans_400Regular',
-              fontSize: 12,
-              color: 'rgba(248,250,252,0.6)',
-            }}
-          >
-            {group?.members ?? 0} members
-          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            {isConnected && (
+              <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#4ade80' }} />
+            )}
+            <Text
+              style={{
+                fontFamily: 'OpenSans_400Regular',
+                fontSize: 12,
+                color: 'rgba(248,250,252,0.6)',
+              }}
+            >
+              {isConnected ? 'Connected' : 'Connecting...'}
+            </Text>
+          </View>
         </View>
 
         <Pressable
@@ -242,26 +264,28 @@ export function GroupChatScreen({ route, navigation }: any) {
       </View>
 
       {/* ── Date separator ── */}
-      <View style={{ alignItems: 'center', paddingVertical: 10 }}>
-        <View
-          style={{
-            backgroundColor: colors.muted,
-            borderRadius: 10,
-            paddingHorizontal: 14,
-            paddingVertical: 4,
-          }}
-        >
-          <Text
+      {messages.length > 0 && (
+        <View style={{ alignItems: 'center', paddingVertical: 10 }}>
+          <View
             style={{
-              fontFamily: 'OpenSans_600SemiBold',
-              fontSize: 11,
-              color: colors.mutedForeground,
+              backgroundColor: colors.muted,
+              borderRadius: 10,
+              paddingHorizontal: 14,
+              paddingVertical: 4,
             }}
           >
-            Today
-          </Text>
+            <Text
+              style={{
+                fontFamily: 'OpenSans_600SemiBold',
+                fontSize: 11,
+                color: colors.mutedForeground,
+              }}
+            >
+              {formatDateLabel(messages[messages.length - 1]?.createdAt)}
+            </Text>
+          </View>
         </View>
-      </View>
+      )}
 
       {/* ── Messages ── */}
       <KeyboardAvoidingView
@@ -269,63 +293,115 @@ export function GroupChatScreen({ route, navigation }: any) {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={0}
       >
-        <FlatList
-          data={invertedMessages}
-          renderItem={renderMessage}
-          keyExtractor={(item) => item.id}
-          inverted
-          contentContainerStyle={{ paddingTop: 8 }}
-          showsVerticalScrollIndicator={false}
-        />
-
-        {/* ── Input bar ── */}
-        <View
-          style={{
-            flexDirection: 'row',
-            alignItems: 'flex-end',
-            paddingHorizontal: 12,
-            paddingTop: 8,
-            paddingBottom: Math.max(insets.bottom, 12),
-            backgroundColor: colors.card,
-            borderTopWidth: 1,
-            borderTopColor: colors.border,
-          }}
-        >
-          <TextInput
-            value={text}
-            onChangeText={setText}
-            placeholder="Type a message..."
-            placeholderTextColor={colors.mutedForeground}
-            multiline
-            style={{
-              flex: 1,
-              fontFamily: 'OpenSans_400Regular',
-              fontSize: 15,
-              color: colors.foreground,
-              backgroundColor: colors.background,
-              borderRadius: 22,
-              paddingHorizontal: 16,
-              paddingTop: 10,
-              paddingBottom: 10,
-              maxHeight: 100,
-              borderWidth: 1,
-              borderColor: colors.border,
-            }}
+        {loadingHistory ? (
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+            <ActivityIndicator size="large" color={colors.accent} />
+          </View>
+        ) : (
+          <FlatList
+            ref={flatListRef}
+            data={invertedMessages}
+            renderItem={renderMessage}
+            keyExtractor={(item) => item.id}
+            inverted
+            contentContainerStyle={{ paddingTop: 8 }}
+            showsVerticalScrollIndicator={false}
+            onEndReached={loadOlderMessages}
+            onEndReachedThreshold={0.3}
+            ListFooterComponent={
+              loadingMore ? (
+                <ActivityIndicator size="small" color={colors.accent} style={{ paddingVertical: 12 }} />
+              ) : null
+            }
+            ListEmptyComponent={
+              <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 60 }}>
+                <Text style={{ fontFamily: 'OpenSans_400Regular', fontSize: 14, color: colors.mutedForeground }}>
+                  No messages yet. Start the conversation!
+                </Text>
+              </View>
+            }
           />
-          <Pressable
-            style={({ pressed }) => ({
-              width: 42,
-              height: 42,
-              borderRadius: 21,
-              backgroundColor: pressed ? '#c99a06' : colors.accent,
+        )}
+
+        {/* ── Input bar or read-only banner ── */}
+        {canPost ? (
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'flex-end',
+              paddingHorizontal: 12,
+              paddingTop: 8,
+              paddingBottom: Math.max(insets.bottom, 12),
+              backgroundColor: colors.card,
+              borderTopWidth: 1,
+              borderTopColor: colors.border,
+            }}
+          >
+            <TextInput
+              value={text}
+              onChangeText={setText}
+              placeholder="Type a message..."
+              placeholderTextColor={colors.mutedForeground}
+              multiline
+              style={{
+                flex: 1,
+                fontFamily: 'OpenSans_400Regular',
+                fontSize: 15,
+                color: colors.foreground,
+                backgroundColor: colors.background,
+                borderRadius: 22,
+                paddingHorizontal: 16,
+                paddingTop: 10,
+                paddingBottom: 10,
+                maxHeight: 100,
+                borderWidth: 1,
+                borderColor: colors.border,
+              }}
+            />
+            <Pressable
+              onPress={handleSend}
+              disabled={!text.trim()}
+              style={({ pressed }) => ({
+                width: 42,
+                height: 42,
+                borderRadius: 21,
+                backgroundColor: pressed ? '#c99a06' : colors.accent,
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginLeft: 8,
+                opacity: text.trim() ? 1 : 0.5,
+              })}
+            >
+              <Send size={18} color="#0f1729" />
+            </Pressable>
+          </View>
+        ) : (
+          <View
+            style={{
+              flexDirection: 'row',
               alignItems: 'center',
               justifyContent: 'center',
-              marginLeft: 8,
-            })}
+              paddingHorizontal: 20,
+              paddingTop: 14,
+              paddingBottom: Math.max(insets.bottom, 14),
+              backgroundColor: colors.muted,
+              borderTopWidth: 1,
+              borderTopColor: colors.border,
+              gap: 8,
+            }}
           >
-            <Send size={18} color="#0f1729" />
-          </Pressable>
-        </View>
+            <VolumeX size={16} color={colors.mutedForeground} />
+            <Text
+              style={{
+                fontFamily: 'OpenSans_600SemiBold',
+                fontSize: 13,
+                color: colors.mutedForeground,
+              }}
+            >
+              Only admins can post in this channel
+            </Text>
+          </View>
+        )}
       </KeyboardAvoidingView>
     </View>
   );

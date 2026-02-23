@@ -10,7 +10,7 @@ export function useTheme() {
     colors: {
       primary: isDark ? '#243566' : '#1b294b',
       primaryForeground: '#f8fafc',
-      accent: isDark ? '#f0bb0e' : '#e7b008',
+      accent: isDark ? '#f5a623' : '#d4920a',
       accentForeground: '#0f1729',
       background: isDark ? '#0a0f1d' : '#f6f7f9',
       card: isDark ? '#111827' : '#ffffff',

@@ -17,7 +17,6 @@ export function LoginScreen({ navigation }: any) {
     setLoading(true);
     try {
       await login(email.trim().toLowerCase(), password);
-      navigation.getParent()?.goBack();
     } catch (err: any) {
       Alert.alert('Login Failed', err.message);
     } finally {

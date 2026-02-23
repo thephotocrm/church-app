@@ -5,28 +5,25 @@ import { Button, Input } from '../../components/ui';
 
 export function RegisterScreen({ navigation }: any) {
   const { register } = useAuth();
-  const [name, setName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
   async function handleRegister() {
-    if (!name || !email || !password) {
+    if (!firstName || !lastName || !email || !password) {
       Alert.alert('Error', 'Please fill in all fields');
       return;
     }
-    if (password.length < 8) {
-      Alert.alert('Error', 'Password must be at least 8 characters');
+    if (password.length < 6) {
+      Alert.alert('Error', 'Password must be at least 6 characters');
       return;
     }
     setLoading(true);
     try {
-      await register(name.trim(), email.trim().toLowerCase(), password);
-      Alert.alert(
-        'Account Created',
-        'Please check your email to verify your account. An admin will approve your access.',
-        [{ text: 'OK', onPress: () => navigation.navigate('Login') }]
-      );
+      await register(firstName.trim(), lastName.trim(), email.trim().toLowerCase(), password);
+      // Auto-logged in — RootNavigator will show PendingScreen or MainTabs
     } catch (err: any) {
       Alert.alert('Registration Failed', err.message);
     } finally {
@@ -47,12 +44,24 @@ export function RegisterScreen({ navigation }: any) {
           Join the FPCD community
         </Text>
 
-        <Input
-          label="Full Name"
-          placeholder="John Doe"
-          value={name}
-          onChangeText={setName}
-        />
+        <View className="flex-row gap-3">
+          <View className="flex-1">
+            <Input
+              label="First Name"
+              placeholder="John"
+              value={firstName}
+              onChangeText={setFirstName}
+            />
+          </View>
+          <View className="flex-1">
+            <Input
+              label="Last Name"
+              placeholder="Doe"
+              value={lastName}
+              onChangeText={setLastName}
+            />
+          </View>
+        </View>
         <Input
           label="Email"
           placeholder="you@example.com"
@@ -63,7 +72,7 @@ export function RegisterScreen({ navigation }: any) {
         />
         <Input
           label="Password"
-          placeholder="Min 8 characters"
+          placeholder="Min 6 characters"
           value={password}
           onChangeText={setPassword}
           secureTextEntry

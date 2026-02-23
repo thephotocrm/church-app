@@ -1,7 +1,8 @@
 import React from 'react';
-import { View, Text, Pressable } from 'react-native';
-import { DollarSign, MessageCircle, ChevronRight, LogOut } from 'lucide-react-native';
+import { View, Text, Pressable, Alert } from 'react-native';
+import { DollarSign, MessageCircle, ChevronRight, LogOut, Trash2 } from 'lucide-react-native';
 import { useAuth } from '../../contexts/AuthContext';
+import { api } from '../../services/api';
 import { ScreenWrapper, Avatar, Separator, Button } from '../../components/ui';
 import { useTheme } from '../../lib/useTheme';
 
@@ -25,8 +26,32 @@ function MenuItem({ icon, label, onPress }: MenuItemProps) {
 }
 
 export function ProfileScreen({ navigation }: any) {
-  const { user, logout } = useAuth();
+  const { user, token, logout } = useAuth();
   const { colors } = useTheme();
+
+  function handleDeleteAccount() {
+    Alert.alert(
+      'Delete Account',
+      'Are you sure you want to permanently delete your account? This action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              if (token) {
+                await api.deleteAccount(token);
+              }
+              await logout();
+            } catch (error: any) {
+              Alert.alert('Error', error.message || 'Failed to delete account. Please try again.');
+            }
+          },
+        },
+      ],
+    );
+  }
 
   return (
     <ScreenWrapper padded={false}>
@@ -54,7 +79,7 @@ export function ProfileScreen({ navigation }: any) {
         />
       </View>
 
-      <View className="mx-4 mt-8">
+      <View className="mx-4 mt-8 gap-2">
         <Button
           variant="ghost"
           onPress={logout}
@@ -62,6 +87,14 @@ export function ProfileScreen({ navigation }: any) {
           textClassName="text-destructive"
         >
           Sign Out
+        </Button>
+        <Button
+          variant="ghost"
+          onPress={handleDeleteAccount}
+          icon={<Trash2 size={18} color={colors.destructive} />}
+          textClassName="text-destructive"
+        >
+          Delete Account
         </Button>
       </View>
     </ScreenWrapper>

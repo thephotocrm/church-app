@@ -1,14 +1,14 @@
 import React from 'react';
 import { View, Text, Pressable, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Home, Calendar, Play, Users, MoreHorizontal } from 'lucide-react-native';
+import { Home, Calendar, Heart, Users, MoreHorizontal } from 'lucide-react-native';
 import { useTheme } from '../../lib/useTheme';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 
 const TAB_ICONS: Record<string, typeof Home> = {
   Home,
   Events: Calendar,
-  Watch: Play,
+  Give: Heart,
   Groups: Users,
   More: MoreHorizontal,
 };
@@ -16,7 +16,11 @@ const TAB_ICONS: Record<string, typeof Home> = {
 export function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
-  const centerIndex = 2; // Watch is the 3rd tab (index 2)
+  const centerIndex = 2; // Give is the 3rd tab (index 2)
+
+  const focusedRoute = state.routes[state.index];
+  const focusedOptions = descriptors[focusedRoute.key].options;
+  if ((focusedOptions.tabBarStyle as any)?.display === 'none') return null;
 
   return (
     <View
@@ -102,7 +106,7 @@ export function CustomTabBar({ state, descriptors, navigation }: BottomTabBarPro
                   }),
                 }}
               >
-                <Icon size={28} color="#ffffff" fill="#ffffff" />
+                <Icon size={28} color="#ffffff" />
               </View>
               <Text
                 style={{

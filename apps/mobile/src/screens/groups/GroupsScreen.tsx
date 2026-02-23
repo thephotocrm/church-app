@@ -1,144 +1,204 @@
-import React from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
   Pressable,
   ScrollView,
-  Image,
+  TextInput,
   Platform,
+  RefreshControl,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Search, Users, Plus } from 'lucide-react-native';
+import { Search, Plus, Megaphone, Users, ChevronRight } from 'lucide-react-native';
 import { useTheme } from '../../lib/useTheme';
+import { useAuth } from '../../contexts/AuthContext';
+import { api } from '../../services/api';
+import { AuthRequiredScreen } from '../auth/AuthRequiredScreen';
+import type { GroupResponse, GroupInboxItem, ChatMessageResponse } from '../../types/groups';
 
-// ── Types ──────────────────────────────────────────────────
-interface GroupInbox {
-  id: string;
-  name: string;
-  description: string;
-  image: string;
-  members: number;
-  lastMessage: string;
-  lastSender: string;
-  lastTime: string;
-  unread: number;
-  joined: boolean;
+// ── Palette ──────────────────────────────────────────────────────
+const GOLD = '#C9943A';
+const WARM_GRAY = '#8C8078';
+
+// ── Banner colors for My Group cards ─────────────────────────────
+const BANNER_COLORS = [
+  { bg: '#3D2B0E', text: '#E8B860' },
+  { bg: '#1A2940', text: '#7EB8E0' },
+  { bg: '#2D1B3D', text: '#C89EE8' },
+  { bg: '#1A3329', text: '#7EC8A0' },
+  { bg: '#3D1A1A', text: '#E8A07E' },
+];
+
+// ── Category filter labels ───────────────────────────────────────
+const FILTERS = ['All', 'Men', 'Women', 'Youth', 'Family', 'Seniors'];
+
+// ── Discover card emoji/tag styling ──────────────────────────────
+const TAG_STYLES: Record<string, { bg: string; color: string; emoji: string }> = {
+  men:     { bg: 'rgba(37,99,235,0.1)',  color: '#2563EB', emoji: '🛡️' },
+  women:   { bg: 'rgba(219,39,119,0.1)', color: '#DB2777', emoji: '🌸' },
+  youth:   { bg: 'rgba(124,58,237,0.1)', color: '#7C3AED', emoji: '⚡' },
+  family:  { bg: 'rgba(5,150,105,0.1)',  color: '#059669', emoji: '👨‍👩‍👧' },
+  seniors: { bg: 'rgba(201,148,58,0.12)', color: GOLD,     emoji: '☕' },
+  general: { bg: 'rgba(26,23,20,0.07)',  color: WARM_GRAY, emoji: '👥' },
+};
+
+function guessTag(name: string): string {
+  const lower = name.toLowerCase();
+  if (lower.includes('men') && !lower.includes('women')) return 'men';
+  if (lower.includes('women') || lower.includes('ladies') || lower.includes('sister')) return 'women';
+  if (lower.includes('youth') || lower.includes('teen') || lower.includes('young adult')) return 'youth';
+  if (lower.includes('famil')) return 'family';
+  if (lower.includes('senior') || lower.includes('elder')) return 'seniors';
+  return 'general';
 }
 
-// ── Sample data ────────────────────────────────────────────
-const MY_GROUPS: GroupInbox[] = [
-  {
-    id: '1',
-    name: "Men's Bible Study",
-    description: 'Weekly study through the book of Romans with fellowship and accountability.',
-    image: 'https://i.pravatar.cc/200?img=52',
-    members: 14,
-    lastMessage: 'See everyone Tuesday! Romans 8 this week.',
-    lastSender: 'Pastor Johnson',
-    lastTime: '2m',
-    unread: 3,
-    joined: true,
-  },
-  {
-    id: '2',
-    name: "Women's Prayer Circle",
-    description: 'A safe space for women to share, pray, and grow together in faith.',
-    image: 'https://i.pravatar.cc/200?img=32',
-    members: 18,
-    lastMessage: 'Praying for the Johnson family this week',
-    lastSender: 'Sister Williams',
-    lastTime: '15m',
-    unread: 1,
-    joined: true,
-  },
-  {
-    id: '3',
-    name: 'Young Adults',
-    description: 'Community for college-age and young professionals.',
-    image: 'https://images.unsplash.com/photo-1523580494863-6f3031224c94?w=400&q=80',
-    members: 32,
-    lastMessage: 'Game night this Friday at 7! Who\'s in?',
-    lastSender: 'Rev. Davis',
-    lastTime: '1h',
-    unread: 0,
-    joined: true,
-  },
-  {
-    id: '4',
-    name: 'Worship Team',
-    description: 'Rehearsal and spiritual preparation for Sunday worship.',
-    image: 'https://images.unsplash.com/photo-1510915361894-db8b60106cb1?w=400&q=80',
-    members: 12,
-    lastMessage: 'New setlist uploaded for Sunday',
-    lastSender: 'Minister Taylor',
-    lastTime: '3h',
-    unread: 5,
-    joined: true,
-  },
-];
+// ── Helpers ──────────────────────────────────────────────────────
+function timeAgo(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'now';
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d`;
+}
 
-const DISCOVER_GROUPS: GroupInbox[] = [
-  {
-    id: '5',
-    name: 'Marriage Enrichment',
-    description: 'Strengthening marriages through biblical principles and community.',
-    image: 'https://images.unsplash.com/photo-1511895426328-dc8714191300?w=400&q=80',
-    members: 10,
-    lastMessage: '',
-    lastSender: '',
-    lastTime: '',
-    unread: 0,
-    joined: false,
-  },
-  {
-    id: '6',
-    name: 'Senior Saints',
-    description: 'Fellowship, devotionals, and outings for seasoned members.',
-    image: 'https://images.unsplash.com/photo-1517457373958-b7bdd4587205?w=400&q=80',
-    members: 22,
-    lastMessage: '',
-    lastSender: '',
-    lastTime: '',
-    unread: 0,
-    joined: false,
-  },
-  {
-    id: '7',
-    name: 'Community Outreach',
-    description: 'Serving our neighborhood with food drives and mentoring.',
-    image: 'https://images.unsplash.com/photo-1469571486292-0ba58a3f068b?w=400&q=80',
-    members: 15,
-    lastMessage: '',
-    lastSender: '',
-    lastTime: '',
-    unread: 0,
-    joined: false,
-  },
-];
-
-// ── Component ──────────────────────────────────────────────
+// ── Component ────────────────────────────────────────────────────
 export function GroupsScreen({ navigation }: any) {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
+  const { token, isAuthenticated } = useAuth();
+
+  const [myGroups, setMyGroups] = useState<GroupInboxItem[]>([]);
+  const [discoverGroups, setDiscoverGroups] = useState<GroupResponse[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [joiningId, setJoiningId] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [activeFilter, setActiveFilter] = useState('All');
+
+  const creamBg = isDark ? colors.background : '#FAF7F2';
+  const inkColor = isDark ? colors.foreground : '#1A1714';
+  const cardBg = isDark ? colors.card : '#FFFFFF';
+  const surfaceBg = isDark ? colors.muted : '#F0EBE3';
+  const borderColor = isDark ? colors.border : 'rgba(26,23,20,0.07)';
+
+  const loadGroups = useCallback(async () => {
+    if (!token) {
+      setLoading(false);
+      return;
+    }
+    try {
+      const [myGroupsList, allGroupsList] = await Promise.all([
+        api.getMyGroups(token),
+        api.getGroups(token),
+      ]);
+
+      const myGroupIds = new Set(myGroupsList.map((g) => g.id));
+
+      const enriched: GroupInboxItem[] = await Promise.all(
+        myGroupsList.map(async (group) => {
+          let lastMessage: ChatMessageResponse | null = null;
+          try {
+            const msgs = await api.getGroupMessages(token, group.id, 1);
+            lastMessage = msgs[0] ?? null;
+          } catch {
+            // OK — group may have no messages
+          }
+          return { ...group, lastMessage };
+        }),
+      );
+
+      enriched.sort((a, b) => {
+        const aTime = a.lastMessage?.createdAt ?? a.createdAt;
+        const bTime = b.lastMessage?.createdAt ?? b.createdAt;
+        return new Date(bTime).getTime() - new Date(aTime).getTime();
+      });
+
+      setMyGroups(enriched);
+      setDiscoverGroups(allGroupsList.filter((g) => !myGroupIds.has(g.id) && !g.isDefault));
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to load groups');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [token]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadGroups();
+    }, [loadGroups]),
+  );
+
+  const handleJoin = async (group: GroupResponse) => {
+    if (!token) return;
+    setJoiningId(group.id);
+    try {
+      await api.joinGroup(token, group.id);
+      await loadGroups();
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to join group');
+    } finally {
+      setJoiningId(null);
+    }
+  };
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    loadGroups();
+  };
+
+  if (!isAuthenticated) return <AuthRequiredScreen featureName="Groups" />;
+
+  if (loading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: creamBg, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" color={GOLD} />
+      </View>
+    );
+  }
+
+  // Filter discover groups
+  const filteredDiscover = discoverGroups.filter((g) => {
+    const tag = guessTag(g.name);
+    const matchFilter = activeFilter === 'All' || tag === activeFilter.toLowerCase();
+    const matchSearch = g.name.toLowerCase().includes(search.toLowerCase());
+    return matchFilter && matchSearch;
+  });
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
-      {/* ── Navy header ── */}
-      <View
-        style={{
-          backgroundColor: colors.primary,
-          paddingTop: insets.top + 8,
-          paddingBottom: 18,
-          paddingHorizontal: 20,
-        }}
+    <View style={{ flex: 1, backgroundColor: creamBg }}>
+      <ScrollView
+        contentContainerStyle={{ paddingBottom: insets.bottom + 96 }}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={GOLD} />
+        }
       >
-        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <View style={{ flex: 1 }}>
+        {/* ── Header ── */}
+        <View
+          style={{
+            paddingHorizontal: 24,
+            paddingTop: insets.top + 10,
+            paddingBottom: 20,
+            flexDirection: 'row',
+            alignItems: 'flex-start',
+            justifyContent: 'space-between',
+          }}
+        >
+          <View>
             <Text
               style={{
                 fontFamily: 'PlayfairDisplay_700Bold',
-                fontSize: 28,
-                color: '#f8fafc',
+                fontSize: 30,
+                color: inkColor,
+                letterSpacing: -0.5,
+                lineHeight: 34,
               }}
             >
               Groups
@@ -147,283 +207,483 @@ export function GroupsScreen({ navigation }: any) {
               style={{
                 fontFamily: 'OpenSans_400Regular',
                 fontSize: 13,
-                color: colors.accent,
-                marginTop: 2,
+                color: WARM_GRAY,
+                marginTop: 4,
               }}
             >
               Stay connected
             </Text>
           </View>
-          <View style={{ opacity: 0.4 }}>
-            <Users size={28} color="#f8fafc" />
+          <Pressable
+            onPress={() => navigation.navigate('GroupDetail', {})}
+            className="active:opacity-80"
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: 20,
+              backgroundColor: inkColor,
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginTop: 4,
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 4 },
+              shadowOpacity: 0.2,
+              shadowRadius: 12,
+              elevation: 4,
+            }}
+          >
+            <Plus size={20} color="#fff" />
+          </Pressable>
+        </View>
+
+        {/* ── Search ── */}
+        <View style={{ paddingHorizontal: 16, marginBottom: 20 }}>
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              backgroundColor: cardBg,
+              borderRadius: 16,
+              paddingHorizontal: 16,
+              paddingVertical: 13,
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: 0.06,
+              shadowRadius: 10,
+              elevation: 2,
+            }}
+          >
+            <Search size={16} color={WARM_GRAY} />
+            <TextInput
+              value={search}
+              onChangeText={setSearch}
+              placeholder="Search groups..."
+              placeholderTextColor={WARM_GRAY}
+              style={{
+                flex: 1,
+                fontFamily: 'OpenSans_400Regular',
+                fontSize: 14,
+                color: inkColor,
+                marginLeft: 10,
+                padding: 0,
+              }}
+            />
           </View>
         </View>
 
-        {/* Search bar */}
-        <Pressable
+        {/* ── Category Filters ── */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ paddingHorizontal: 16, gap: 8, paddingBottom: 22 }}
+        >
+          {FILTERS.map((f) => {
+            const isActive = activeFilter === f;
+            return (
+              <Pressable
+                key={f}
+                onPress={() => setActiveFilter(f)}
+                className="active:opacity-80"
+                style={{
+                  paddingVertical: 8,
+                  paddingHorizontal: 16,
+                  borderRadius: 100,
+                  borderWidth: 1.5,
+                  borderColor: isActive ? inkColor : borderColor,
+                  backgroundColor: isActive ? inkColor : cardBg,
+                }}
+              >
+                <Text
+                  style={{
+                    fontFamily: 'OpenSans_600SemiBold',
+                    fontSize: 13,
+                    color: isActive ? '#fff' : WARM_GRAY,
+                  }}
+                >
+                  {f}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+
+        {/* ── My Groups (horizontal scroll) ── */}
+        <View
           style={{
             flexDirection: 'row',
             alignItems: 'center',
-            backgroundColor: 'rgba(255,255,255,0.1)',
-            borderRadius: 12,
-            paddingHorizontal: 14,
-            paddingVertical: 11,
-            marginTop: 16,
+            justifyContent: 'space-between',
+            paddingHorizontal: 20,
+            marginBottom: 12,
           }}
         >
-          <Search size={16} color="rgba(255,255,255,0.5)" />
-          <Text
-            style={{
-              fontFamily: 'OpenSans_400Regular',
-              fontSize: 14,
-              color: 'rgba(255,255,255,0.5)',
-              marginLeft: 10,
-            }}
-          >
-            Search groups...
-          </Text>
-        </Pressable>
-      </View>
-
-      <ScrollView
-        contentContainerStyle={{ paddingBottom: insets.bottom + 96 }}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* ── My Groups ── */}
-        <View style={{ paddingHorizontal: 20, marginTop: 20 }}>
           <Text
             style={{
               fontFamily: 'OpenSans_700Bold',
-              fontSize: 13,
-              color: colors.accent,
-              letterSpacing: 1,
+              fontSize: 11,
+              letterSpacing: 1.8,
               textTransform: 'uppercase',
-              marginBottom: 12,
-              marginLeft: 4,
+              color: WARM_GRAY,
             }}
           >
             My Groups
           </Text>
-
-          <View style={{ gap: 10 }}>
-          {MY_GROUPS.map((group) => (
-            <View key={group.id} style={{ borderBottomWidth: 1, borderBottomColor: colors.border, paddingBottom: 10 }}>
-            <Pressable
-              onPress={() => navigation.navigate('GroupChat', { group })}
-              style={({ pressed }) => ({
-                flexDirection: 'row',
-                alignItems: 'center',
-                backgroundColor: pressed ? colors.muted : colors.card,
-                borderRadius: 16,
-                borderWidth: 1,
-                borderColor: colors.border,
-                padding: 12,
-                ...Platform.select({
-                  ios: {
-                    shadowColor: '#000',
-                    shadowOffset: { width: 0, height: 1 },
-                    shadowOpacity: 0.04,
-                    shadowRadius: 3,
-                  },
-                  android: { elevation: 1 },
-                }),
-              })}
+          <Pressable className="active:opacity-70">
+            <Text
+              style={{ fontFamily: 'OpenSans_600SemiBold', fontSize: 12, color: GOLD }}
             >
-              {/* Group avatar */}
-              <Image
-                source={{ uri: group.image }}
-                style={{
-                  width: 52,
-                  height: 52,
-                  borderRadius: 26,
-                  backgroundColor: colors.muted,
-                }}
-              />
+              See all
+            </Text>
+          </Pressable>
+        </View>
 
-              {/* Message preview */}
-              <View style={{ flex: 1, marginLeft: 12 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <Text
-                    numberOfLines={1}
+        {myGroups.length === 0 ? (
+          <Text
+            style={{
+              fontFamily: 'OpenSans_400Regular',
+              fontSize: 14,
+              color: WARM_GRAY,
+              textAlign: 'center',
+              paddingVertical: 24,
+              paddingHorizontal: 20,
+            }}
+          >
+            You haven't joined any groups yet.
+          </Text>
+        ) : (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 24 }}
+          >
+            {myGroups.map((group, index) => {
+              const banner = BANNER_COLORS[index % BANNER_COLORS.length];
+              const lastTime = group.lastMessage
+                ? timeAgo(group.lastMessage.createdAt)
+                : null;
+              const preview = group.lastMessage
+                ? `${group.lastMessage.member?.firstName ?? 'Unknown'}: ${group.lastMessage.content}`
+                : 'No messages yet';
+
+              return (
+                <Pressable
+                  key={group.id}
+                  onPress={() => navigation.navigate('GroupChat', { group })}
+                  className="active:opacity-80"
+                  style={{
+                    width: 160,
+                    backgroundColor: cardBg,
+                    borderRadius: 22,
+                    overflow: 'hidden',
+                    shadowColor: '#000',
+                    shadowOffset: { width: 0, height: 3 },
+                    shadowOpacity: 0.08,
+                    shadowRadius: 14,
+                    elevation: 3,
+                  }}
+                >
+                  {/* Colored banner */}
+                  <View
                     style={{
-                      fontFamily: 'OpenSans_700Bold',
-                      fontSize: 15,
-                      color: colors.foreground,
-                      flex: 1,
-                      marginRight: 8,
+                      height: 72,
+                      backgroundColor: banner.bg,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      position: 'relative',
                     }}
                   >
-                    {group.name}
-                  </Text>
-                  <Text
-                    style={{
-                      fontFamily: 'OpenSans_400Regular',
-                      fontSize: 12,
-                      color: colors.mutedForeground,
-                    }}
-                  >
-                    {group.lastTime}
-                  </Text>
-                </View>
-
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 3 }}>
-                  <Text
-                    numberOfLines={1}
-                    style={{
-                      fontFamily: 'OpenSans_400Regular',
-                      fontSize: 13,
-                      color: colors.mutedForeground,
-                      flex: 1,
-                      marginRight: 8,
-                    }}
-                  >
-                    <Text style={{ fontFamily: 'OpenSans_600SemiBold' }}>
-                      {group.lastSender}:
-                    </Text>
-                    {' '}{group.lastMessage}
-                  </Text>
-
-                  {group.unread > 0 && (
                     <View
                       style={{
-                        backgroundColor: colors.accent,
-                        borderRadius: 10,
-                        minWidth: 20,
-                        height: 20,
+                        width: 46,
+                        height: 46,
+                        borderRadius: 23,
+                        backgroundColor: cardBg,
                         alignItems: 'center',
                         justifyContent: 'center',
-                        paddingHorizontal: 6,
+                        shadowColor: '#000',
+                        shadowOffset: { width: 0, height: 2 },
+                        shadowOpacity: 0.15,
+                        shadowRadius: 8,
+                        elevation: 3,
+                      }}
+                    >
+                      <Text
+                        style={{
+                          fontFamily: 'PlayfairDisplay_700Bold',
+                          fontSize: 20,
+                          color: banner.text,
+                        }}
+                      >
+                        {group.name.charAt(0)}
+                      </Text>
+                    </View>
+                    {/* Announcement badge or unread dot */}
+                    {group.type === 'announcement' ? (
+                      <View
+                        style={{
+                          position: 'absolute',
+                          top: 10,
+                          right: 12,
+                        }}
+                      >
+                        <Megaphone size={12} color={banner.text} />
+                      </View>
+                    ) : (group.unreadCount ?? 0) > 0 ? (
+                      <View
+                        style={{
+                          position: 'absolute',
+                          top: 12,
+                          right: 14,
+                          width: 9,
+                          height: 9,
+                          borderRadius: 5,
+                          backgroundColor: GOLD,
+                          borderWidth: 2,
+                          borderColor: cardBg,
+                        }}
+                      />
+                    ) : null}
+                  </View>
+
+                  {/* Card body */}
+                  <View style={{ padding: 13, paddingTop: 10 }}>
+                    <Text
+                      numberOfLines={1}
+                      style={{
+                        fontFamily: 'OpenSans_700Bold',
+                        fontSize: 14,
+                        color: inkColor,
+                        marginBottom: 3,
+                      }}
+                    >
+                      {group.name}
+                    </Text>
+                    <Text
+                      numberOfLines={1}
+                      style={{
+                        fontFamily: 'OpenSans_400Regular',
+                        fontSize: 11.5,
+                        color: WARM_GRAY,
+                      }}
+                    >
+                      {preview}
+                    </Text>
+                    {lastTime && (
+                      <Text
+                        style={{
+                          fontFamily: 'OpenSans_600SemiBold',
+                          fontSize: 10,
+                          color: GOLD,
+                          marginTop: 6,
+                        }}
+                      >
+                        {lastTime} ago
+                      </Text>
+                    )}
+                  </View>
+                </Pressable>
+              );
+            })}
+
+            {/* Join more CTA card */}
+            <Pressable
+              className="active:opacity-70"
+              style={{
+                width: 160,
+                minHeight: 148,
+                backgroundColor: surfaceBg,
+                borderRadius: 22,
+                borderWidth: 1.5,
+                borderStyle: 'dashed',
+                borderColor: borderColor,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Text style={{ fontSize: 28, color: WARM_GRAY, marginBottom: 6 }}>+</Text>
+              <Text
+                style={{
+                  fontFamily: 'OpenSans_600SemiBold',
+                  fontSize: 12,
+                  color: WARM_GRAY,
+                  textAlign: 'center',
+                  paddingHorizontal: 12,
+                }}
+              >
+                Join a new group
+              </Text>
+            </Pressable>
+          </ScrollView>
+        )}
+
+        {/* ── Discover ── */}
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            paddingHorizontal: 20,
+            marginBottom: 12,
+          }}
+        >
+          <Text
+            style={{
+              fontFamily: 'OpenSans_700Bold',
+              fontSize: 11,
+              letterSpacing: 1.8,
+              textTransform: 'uppercase',
+              color: WARM_GRAY,
+            }}
+          >
+            Discover
+          </Text>
+          <Pressable className="active:opacity-70">
+            <Text
+              style={{ fontFamily: 'OpenSans_600SemiBold', fontSize: 12, color: GOLD }}
+            >
+              Browse all
+            </Text>
+          </Pressable>
+        </View>
+
+        <View style={{ paddingHorizontal: 16, gap: 10 }}>
+          {filteredDiscover.length === 0 ? (
+            <Text
+              style={{
+                fontFamily: 'OpenSans_400Regular',
+                fontSize: 14,
+                color: WARM_GRAY,
+                textAlign: 'center',
+                paddingVertical: 40,
+              }}
+            >
+              {search
+                ? `No groups found for "${search}"`
+                : 'No groups to discover right now'}
+            </Text>
+          ) : (
+            filteredDiscover.map((group) => {
+              const tag = guessTag(group.name);
+              const style = TAG_STYLES[tag] ?? TAG_STYLES.general;
+              const tagLabel = tag.charAt(0).toUpperCase() + tag.slice(1);
+
+              return (
+                <Pressable
+                  key={group.id}
+                  onPress={() => navigation.navigate('GroupDetail', { groupId: group.id })}
+                  className="active:opacity-80"
+                  style={{
+                    backgroundColor: cardBg,
+                    borderRadius: 22,
+                    padding: 16,
+                    paddingRight: 14,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    shadowColor: '#000',
+                    shadowOffset: { width: 0, height: 2 },
+                    shadowOpacity: 0.06,
+                    shadowRadius: 12,
+                    elevation: 2,
+                  }}
+                >
+                  {/* Emoji avatar */}
+                  <View
+                    style={{
+                      width: 52,
+                      height: 52,
+                      borderRadius: 16,
+                      backgroundColor: style.bg,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      marginRight: 14,
+                    }}
+                  >
+                    <Text style={{ fontSize: 22 }}>{style.emoji}</Text>
+                  </View>
+
+                  {/* Body */}
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text
+                      numberOfLines={1}
+                      style={{
+                        fontFamily: 'OpenSans_700Bold',
+                        fontSize: 15,
+                        color: inkColor,
+                        marginBottom: 2,
+                      }}
+                    >
+                      {group.name}
+                    </Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <Users size={11} color={WARM_GRAY} style={{ marginRight: 4 }} />
+                      <Text
+                        style={{
+                          fontFamily: 'OpenSans_400Regular',
+                          fontSize: 12,
+                          color: WARM_GRAY,
+                        }}
+                      >
+                        {group.description || 'Open group'}
+                      </Text>
+                    </View>
+                    {/* Tag pill */}
+                    <View
+                      style={{
+                        alignSelf: 'flex-start',
+                        backgroundColor: style.bg,
+                        paddingHorizontal: 9,
+                        paddingVertical: 3,
+                        borderRadius: 100,
+                        marginTop: 6,
                       }}
                     >
                       <Text
                         style={{
                           fontFamily: 'OpenSans_700Bold',
-                          fontSize: 11,
-                          color: '#0f1729',
+                          fontSize: 10,
+                          letterSpacing: 0.3,
+                          color: style.color,
                         }}
                       >
-                        {group.unread}
+                        {tagLabel}
                       </Text>
                     </View>
-                  )}
-                </View>
-              </View>
-            </Pressable>
-            </View>
-          ))}
-          </View>
-        </View>
-
-        {/* ── Discover ── */}
-        <View style={{ marginTop: 24 }}>
-          <Text
-            style={{
-              fontFamily: 'OpenSans_700Bold',
-              fontSize: 13,
-              color: colors.accent,
-              letterSpacing: 1,
-              textTransform: 'uppercase',
-              marginBottom: 12,
-              marginLeft: 24,
-            }}
-          >
-            Discover
-          </Text>
-
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ paddingHorizontal: 20, gap: 20 }}
-          >
-            {DISCOVER_GROUPS.map((group) => (
-              <View
-                key={group.id}
-                style={{
-                  width: 180,
-                  backgroundColor: colors.card,
-                  borderRadius: 16,
-                  borderWidth: 1,
-                  borderColor: colors.border,
-                  overflow: 'hidden',
-                  ...Platform.select({
-                    ios: {
-                      shadowColor: '#000',
-                      shadowOffset: { width: 0, height: 2 },
-                      shadowOpacity: 0.06,
-                      shadowRadius: 6,
-                    },
-                    android: { elevation: 2 },
-                  }),
-                }}
-              >
-                <Image
-                  source={{ uri: group.image }}
-                  style={{ width: '100%', height: 100 }}
-                  resizeMode="cover"
-                />
-                <View style={{ padding: 12 }}>
-                  <Text
-                    numberOfLines={1}
-                    style={{
-                      fontFamily: 'OpenSans_700Bold',
-                      fontSize: 14,
-                      color: colors.foreground,
-                      marginBottom: 2,
-                    }}
-                  >
-                    {group.name}
-                  </Text>
-                  <Text
-                    numberOfLines={2}
-                    style={{
-                      fontFamily: 'OpenSans_400Regular',
-                      fontSize: 12,
-                      color: colors.mutedForeground,
-                      lineHeight: 16,
-                      marginBottom: 8,
-                    }}
-                  >
-                    {group.description}
-                  </Text>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
-                    <Users size={12} color={colors.mutedForeground} />
-                    <Text
-                      style={{
-                        fontFamily: 'OpenSans_400Regular',
-                        fontSize: 11,
-                        color: colors.mutedForeground,
-                        marginLeft: 4,
-                      }}
-                    >
-                      {group.members} members
-                    </Text>
                   </View>
+
+                  {/* Join button */}
                   <Pressable
-                    style={({ pressed }) => ({
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      backgroundColor: pressed ? '#c99a06' : colors.accent,
-                      borderRadius: 10,
+                    onPress={() => handleJoin(group)}
+                    disabled={joiningId === group.id}
+                    className="active:opacity-70"
+                    style={{
                       paddingVertical: 8,
-                    })}
+                      paddingHorizontal: 16,
+                      borderRadius: 100,
+                      borderWidth: 1.5,
+                      borderColor: borderColor,
+                      backgroundColor: surfaceBg,
+                      opacity: joiningId === group.id ? 0.6 : 1,
+                      marginLeft: 8,
+                    }}
                   >
-                    <Plus size={14} color="#0f1729" />
-                    <Text
-                      style={{
-                        fontFamily: 'OpenSans_700Bold',
-                        fontSize: 13,
-                        color: '#0f1729',
-                        marginLeft: 4,
-                      }}
-                    >
-                      Join
-                    </Text>
+                    {joiningId === group.id ? (
+                      <ActivityIndicator size="small" color={inkColor} />
+                    ) : (
+                      <Text
+                        style={{
+                          fontFamily: 'OpenSans_700Bold',
+                          fontSize: 12,
+                          color: inkColor,
+                        }}
+                      >
+                        Join
+                      </Text>
+                    )}
                   </Pressable>
-                </View>
-              </View>
-            ))}
-          </ScrollView>
+                </Pressable>
+              );
+            })
+          )}
         </View>
       </ScrollView>
     </View>

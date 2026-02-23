@@ -1,56 +1,82 @@
 import React, { useState } from 'react';
-import { View, Text, Pressable, ScrollView, Alert } from 'react-native';
+import { View, Text, Pressable, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Check } from 'lucide-react-native';
+import type { EventCategory } from '@church-app/shared';
 import { Input, Button } from '../../components/ui';
 import { useTheme } from '../../lib/useTheme';
+import { useAuth } from '../../contexts/AuthContext';
+import { api } from '../../services/api';
 
-const EVENT_COLORS = [
-  { label: 'Gold', value: '#e7b008' },
-  { label: 'Blue', value: '#3b82f6' },
-  { label: 'Pink', value: '#f472b6' },
-  { label: 'Green', value: '#34d399' },
-  { label: 'Navy', value: '#1b294b' },
-  { label: 'Coral', value: '#f87171' },
+const CATEGORIES: { label: string; value: EventCategory; color: string }[] = [
+  { label: 'Worship', value: 'worship', color: '#9333ea' },
+  { label: 'Fellowship', value: 'fellowship', color: '#3b82f6' },
+  { label: 'Outreach', value: 'outreach', color: '#22c55e' },
+  { label: 'Youth', value: 'youth', color: '#f97316' },
+  { label: 'Prayer', value: 'prayer', color: '#6366f1' },
+  { label: 'General', value: 'general', color: '#6b7280' },
 ];
 
 export function AddEventScreen({ navigation }: any) {
   const { colors } = useTheme();
+  const { token } = useAuth();
   const insets = useSafeAreaInsets();
 
   const [title, setTitle] = useState('');
   const [date, setDate] = useState('');
   const [time, setTime] = useState('');
+  const [endTime, setEndTime] = useState('');
   const [location, setLocation] = useState('');
   const [description, setDescription] = useState('');
-  const [color, setColor] = useState(EVENT_COLORS[0].value);
+  const [category, setCategory] = useState<EventCategory>('general');
+  const [saving, setSaving] = useState(false);
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (!token) {
+      Alert.alert('Sign In Required', 'Please sign in to create events.');
+      return;
+    }
     if (!title.trim()) {
       Alert.alert('Required', 'Please enter an event title.');
       return;
     }
-    // Validate date format YYYY-MM-DD
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date.trim())) {
       Alert.alert('Invalid Date', 'Please enter a date in YYYY-MM-DD format.');
       return;
     }
     if (!time.trim()) {
-      Alert.alert('Required', 'Please enter a time.');
+      Alert.alert('Required', 'Please enter a start time.');
       return;
     }
 
-    const newEvent = {
-      id: Date.now().toString(),
-      title: title.trim(),
-      date: date.trim(),
-      time: time.trim(),
-      location: location.trim(),
-      description: description.trim(),
-      color,
-    };
+    // Build ISO startDate from date + time (e.g. "2026-02-22" + "9:00 AM")
+    const startDate = buildISODate(date.trim(), time.trim());
+    if (!startDate) {
+      Alert.alert('Invalid Time', 'Please enter time like "9:00 AM" or "14:00".');
+      return;
+    }
 
-    navigation.navigate('EventsList', { newEvent });
+    const endDate = endTime.trim() ? buildISODate(date.trim(), endTime.trim()) ?? undefined : undefined;
+
+    try {
+      setSaving(true);
+      await api.createEvent(token, {
+        title: title.trim(),
+        description: description.trim() || undefined,
+        startDate,
+        endDate,
+        allDay: false,
+        location: location.trim() || undefined,
+        category,
+        status: 'published',
+        featured: false,
+      });
+      navigation.goBack();
+    } catch (err) {
+      Alert.alert('Error', err instanceof Error ? err.message : 'Failed to create event');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -75,10 +101,16 @@ export function AddEventScreen({ navigation }: any) {
           keyboardType="numbers-and-punctuation"
         />
         <Input
-          label="Time"
+          label="Start Time"
           placeholder="e.g. 9:00 AM"
           value={time}
           onChangeText={setTime}
+        />
+        <Input
+          label="End Time (optional)"
+          placeholder="e.g. 10:30 AM"
+          value={endTime}
+          onChangeText={setEndTime}
         />
         <Input
           label="Location"
@@ -97,31 +129,69 @@ export function AddEventScreen({ navigation }: any) {
           style={{ textAlignVertical: 'top' }}
         />
 
-        {/* Color picker */}
+        {/* Category picker */}
         <Text className="font-body-semibold text-sm text-foreground mb-2">
-          Event Color
+          Category
         </Text>
         <View className="flex-row flex-wrap gap-3 mb-6">
-          {EVENT_COLORS.map((c) => (
+          {CATEGORIES.map((c) => (
             <Pressable
               key={c.value}
-              onPress={() => setColor(c.value)}
-              className="items-center justify-center rounded-full"
+              onPress={() => setCategory(c.value)}
+              className="flex-row items-center px-3 py-2 rounded-full border"
               style={{
-                width: 44,
-                height: 44,
-                backgroundColor: c.value,
-                borderWidth: color === c.value ? 3 : 0,
-                borderColor: colors.foreground,
+                backgroundColor: category === c.value ? c.color + '20' : 'transparent',
+                borderColor: category === c.value ? c.color : colors.border,
               }}
             >
-              {color === c.value && <Check size={20} color="#ffffff" />}
+              <View
+                className="w-3 h-3 rounded-full mr-2"
+                style={{ backgroundColor: c.color }}
+              />
+              <Text
+                className="font-body-bold text-sm"
+                style={{ color: category === c.value ? c.color : colors.foreground }}
+              >
+                {c.label}
+              </Text>
+              {category === c.value && (
+                <Check size={14} color={c.color} style={{ marginLeft: 4 }} />
+              )}
             </Pressable>
           ))}
         </View>
 
-        <Button onPress={handleSave}>Create Event</Button>
+        <Button onPress={handleSave} disabled={saving}>
+          {saving ? <ActivityIndicator size="small" color="#ffffff" /> : 'Create Event'}
+        </Button>
       </View>
     </ScrollView>
   );
+}
+
+/** Parse a date string + time string into an ISO timestamp */
+function buildISODate(dateStr: string, timeStr: string): string | null {
+  // Try parsing "9:00 AM" or "14:00" style times
+  const match12 = timeStr.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  const match24 = timeStr.match(/^(\d{1,2}):(\d{2})$/);
+
+  let hours: number;
+  let minutes: number;
+
+  if (match12) {
+    hours = parseInt(match12[1], 10);
+    minutes = parseInt(match12[2], 10);
+    const period = match12[3].toUpperCase();
+    if (period === 'PM' && hours !== 12) hours += 12;
+    if (period === 'AM' && hours === 12) hours = 0;
+  } else if (match24) {
+    hours = parseInt(match24[1], 10);
+    minutes = parseInt(match24[2], 10);
+  } else {
+    return null;
+  }
+
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const date = new Date(y, m - 1, d, hours, minutes);
+  return date.toISOString();
 }

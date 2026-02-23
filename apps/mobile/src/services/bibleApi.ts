@@ -8,9 +8,15 @@ async function apiFetch<T>(path: string): Promise<T> {
     headers: { 'api-key': API_KEY },
   });
   if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    console.error(`API.Bible ${res.status}: ${path}`, body);
     throw new Error(`API.Bible request failed: ${res.status}`);
   }
   const json = await res.json();
+  if (!json.data) {
+    console.error('API.Bible returned no data:', path, JSON.stringify(json).slice(0, 200));
+    throw new Error('API.Bible returned no data');
+  }
   return json.data as T;
 }
 
