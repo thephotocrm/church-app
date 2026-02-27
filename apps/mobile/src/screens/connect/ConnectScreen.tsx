@@ -1,9 +1,11 @@
 import React from 'react';
-import { View, Text, ScrollView } from 'react-native';
+import { View, Text, ScrollView, Pressable, Linking, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Users, Clock, UtensilsCrossed, BookOpen, Heart } from 'lucide-react-native';
+import { Users, Clock, UtensilsCrossed, BookOpen, Heart, MapPin, Navigation } from 'lucide-react-native';
 import { ScreenWrapper } from '../../components/ui';
 import { useTheme } from '../../lib/useTheme';
+
+const CHURCH_ADDRESS = '110 Security Ct, Wylie, TX 75098';
 
 function InfoCard({
   icon,
@@ -172,6 +174,100 @@ export function ConnectScreen() {
           description="Build meaningful relationships with others in our church family. Connect Nights are a great place to find community."
           colors={colors}
         />
+
+        {/* Location */}
+        <Text
+          style={{
+            fontFamily: 'OpenSans_700Bold',
+            fontSize: 16,
+            color: colors.foreground,
+            marginBottom: 12,
+            marginTop: 8,
+          }}
+        >
+          Where to Find Us
+        </Text>
+
+        <View
+          style={{
+            backgroundColor: colors.card,
+            borderRadius: 16,
+            padding: 16,
+            marginBottom: 12,
+            borderWidth: 1,
+            borderColor: colors.border,
+          }}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+            <View
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: 22,
+                backgroundColor: colors.primary + '15',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginRight: 14,
+              }}
+            >
+              <MapPin size={22} color={colors.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text
+                style={{
+                  fontFamily: 'OpenSans_700Bold',
+                  fontSize: 15,
+                  color: colors.foreground,
+                  marginBottom: 2,
+                }}
+              >
+                First Pentecostal Church of Dallas
+              </Text>
+              <Text
+                style={{
+                  fontFamily: 'OpenSans_400Regular',
+                  fontSize: 13,
+                  color: colors.mutedForeground,
+                  lineHeight: 19,
+                }}
+              >
+                {CHURCH_ADDRESS}
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        <Pressable
+          onPress={() => {
+            const encoded = encodeURIComponent(CHURCH_ADDRESS);
+            const url = Platform.select({
+              ios: `maps:?daddr=${encoded}`,
+              default: `https://www.google.com/maps/dir/?api=1&destination=${encoded}`,
+            });
+            Linking.openURL(url!);
+          }}
+          style={{
+            backgroundColor: colors.primary,
+            borderRadius: 14,
+            paddingVertical: 12,
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginBottom: 20,
+          }}
+        >
+          <Navigation size={16} color="#fff" />
+          <Text
+            style={{
+              fontFamily: 'OpenSans_700Bold',
+              fontSize: 14,
+              color: '#fff',
+              marginLeft: 8,
+            }}
+          >
+            Get Directions
+          </Text>
+        </Pressable>
 
         {/* Welcoming message */}
         <View

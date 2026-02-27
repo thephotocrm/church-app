@@ -127,3 +127,19 @@ export interface LivestreamConfig {
   thumbnailUrl?: string;
   isLive: boolean;
 }
+
+export interface Recording {
+  id: string;
+  title: string;
+  description: string | null;
+  r2Url: string;
+  thumbnailUrl: string | null;
+  duration: number; // seconds
+  streamStartedAt: string;
+  createdAt: string;
+}
+
+export interface RecordingsResponse {
+  items: Recording[];
+  total: number;
+}

@@ -3,6 +3,7 @@ import {
   getPrayerRequests,
   createPrayerRequest,
   prayForRequest,
+  deletePrayerRequest,
   type PrayerRequest,
   type CreatePrayerRequestPayload,
 } from '../services/prayerApi';
@@ -54,5 +55,10 @@ export function usePrayerRequests() {
     return updated;
   }, []);
 
-  return { requests, loading, refreshing, error, refresh, submitRequest, pray };
+  const deleteRequest = useCallback(async (id: string, token: string) => {
+    await deletePrayerRequest(id, token);
+    setRequests((prev) => prev.filter((r) => r.id !== id));
+  }, []);
+
+  return { requests, loading, refreshing, error, refresh, submitRequest, pray, deleteRequest };
 }

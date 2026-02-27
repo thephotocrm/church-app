@@ -13,10 +13,10 @@ import { Heart, MapPin, Mail, ChevronDown, Check, Lock } from 'lucide-react-nati
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as WebBrowser from 'expo-web-browser';
+import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../../lib/useTheme';
 import { useAuth } from '../../contexts/AuthContext';
 import { api } from '../../services/api';
-import { AuthRequiredScreen } from '../auth/AuthRequiredScreen';
 
 const GIVE_URL = 'https://fpcd.life/give';
 const PRESETS = ['10', '25', '50', '100', '250', '500'];
@@ -42,6 +42,7 @@ const MUTED2 = 'rgba(255,255,255,0.08)';
 export function GivingScreen() {
   const { colors } = useTheme();
   const { token, isAuthenticated } = useAuth();
+  const navigation = useNavigation<any>();
   const insets = useSafeAreaInsets();
 
   const [amount, setAmount] = useState('50');
@@ -52,8 +53,6 @@ export function GivingScreen() {
   const [loading, setLoading] = useState(false);
   const [showFundPicker, setShowFundPicker] = useState(false);
   const [showMailAddress, setShowMailAddress] = useState(false);
-
-  if (!isAuthenticated) return <AuthRequiredScreen featureName="Giving" />;
 
   const activeAmount = isCustom ? customAmount : amount;
   const displayAmount = activeAmount
@@ -75,11 +74,13 @@ export function GivingScreen() {
         params.set('frequency', freqMap[frequency] || 'monthly');
       }
       // Try to get auth code so the website can log the member in automatically
-      try {
-        const { code } = await api.getAuthCode(token!);
-        params.set('code', code);
-      } catch {
-        // Auth code endpoint may not exist yet — continue without it
+      if (isAuthenticated) {
+        try {
+          const { code } = await api.getAuthCode(token!);
+          params.set('code', code);
+        } catch {
+          // Auth code endpoint may not exist yet — continue without it
+        }
       }
       await WebBrowser.openBrowserAsync(`${GIVE_URL}?${params.toString()}`);
     } finally {
@@ -457,6 +458,25 @@ export function GivingScreen() {
 
         {/* ── CTA Button ── */}
         <View style={{ paddingHorizontal: 16, marginTop: 24 }}>
+          {!isAuthenticated && (
+            <Pressable
+              onPress={() => navigation.navigate('AuthModal')}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 6,
+                marginBottom: 12,
+              }}
+            >
+              <Text style={{ fontFamily: 'OpenSans_400Regular', fontSize: 13, color: MUTED }}>
+                Save time —
+              </Text>
+              <Text style={{ fontFamily: 'OpenSans_600SemiBold', fontSize: 13, color: GOLD }}>
+                sign in to pre-fill your info
+              </Text>
+            </Pressable>
+          )}
           <Pressable
             onPress={handleGive}
             disabled={loading || !activeAmount || parseFloat(activeAmount || '0') <= 0}

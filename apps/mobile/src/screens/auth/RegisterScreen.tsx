@@ -23,7 +23,7 @@ export function RegisterScreen({ navigation }: any) {
     setLoading(true);
     try {
       await register(firstName.trim(), lastName.trim(), email.trim().toLowerCase(), password);
-      // Auto-logged in — RootNavigator will show PendingScreen or MainTabs
+      navigation.getParent()?.goBack(); // dismiss the AuthModal (pending path re-renders via RootNavigator)
     } catch (err: any) {
       Alert.alert('Registration Failed', err.message);
     } finally {

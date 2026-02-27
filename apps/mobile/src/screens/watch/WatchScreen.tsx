@@ -1,100 +1,123 @@
-import React, { useState } from 'react';
-import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import {
+  View,
+  Text,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Image,
+  ActivityIndicator,
+  StatusBar,
+  BackHandler,
+  useWindowDimensions,
+} from 'react-native';
 import { Video, ResizeMode } from 'expo-av';
-import { Play, Radio, ArrowLeft, Share2, Bell, ChevronRight } from 'lucide-react-native';
+import * as ScreenOrientation from 'expo-screen-orientation';
+import { Play, Pause, Radio, ArrowLeft, Bell, Maximize, Minimize, Volume2, VolumeX } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
+import type { Recording } from '@church-app/shared';
 import { useTheme } from '../../lib/useTheme';
 import { useStreamStatus } from '../../hooks/useStreamStatus';
+import { useRecordings } from '../../hooks/useRecordings';
 
 // ── Palette ──────────────────────────────────────────────────────
 const GOLD = '#C9943A';
 const GOLD_LIGHT = '#E8B860';
 const WARM_GRAY = '#8C8078';
 
-// ── Series filter chips ──────────────────────────────────────────
-const SERIES_FILTERS = ['All', 'Sermons', 'Worship', 'Studies', 'Special'];
+// ── Helpers ───────────────────────────────────────────────────────
+function formatDuration(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
 
-// ── Video data ───────────────────────────────────────────────────
-const PAST_SERVICES = [
-  {
-    id: '1',
-    title: 'Walking in Faith',
-    speaker: 'Pastor Johnson',
-    date: 'Feb 16',
-    duration: '45 min',
-    series: 'Faith Series',
-    seriesBg: 'rgba(201,148,58,0.1)',
-    seriesColor: GOLD,
-    gradientColors: ['#2D1B69', '#5B3FAF'] as const,
-    featured: true,
-  },
-  {
-    id: '2',
-    title: 'The Power of Prayer',
-    speaker: 'Pastor Johnson',
-    date: 'Feb 9',
-    duration: '52 min',
-    series: 'Prayer',
-    seriesBg: 'rgba(124,58,237,0.1)',
-    seriesColor: '#7C3AED',
-    gradientColors: ['#0D3B2E', '#16734F'] as const,
-    featured: false,
-  },
-  {
-    id: '3',
-    title: 'Grace That Transforms',
-    speaker: 'Rev. Williams',
-    date: 'Feb 2',
-    duration: '38 min',
-    series: 'Grace',
-    seriesBg: 'rgba(5,150,105,0.1)',
-    seriesColor: '#059669',
-    gradientColors: ['#3B1A0D', '#8B4513'] as const,
-    featured: false,
-  },
-  {
-    id: '4',
-    title: 'Unity in the Body',
-    speaker: 'Pastor Johnson',
-    date: 'Jan 26',
-    duration: '41 min',
-    series: 'Community',
-    seriesBg: 'rgba(37,99,235,0.1)',
-    seriesColor: '#2563EB',
-    gradientColors: ['#1A2940', '#2D5986'] as const,
-    featured: false,
-  },
-  {
-    id: '5',
-    title: 'Hope Renewed',
-    speaker: 'Rev. Williams',
-    date: 'Jan 19',
-    duration: '36 min',
-    series: 'Hope Series',
-    seriesBg: 'rgba(219,39,119,0.1)',
-    seriesColor: '#DB2777',
-    gradientColors: ['#3B0D2E', '#8B1A6B'] as const,
-    featured: false,
-  },
-];
+function formatDate(iso: string | null): string {
+  if (!iso) return '';
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
 
 export function WatchScreen() {
   const navigation = useNavigation<any>();
   const { colors, isDark } = useTheme();
   const { status, hlsUrl } = useStreamStatus();
+  const { recordings, loading, loadingMore, error, hasMore, loadMore } = useRecordings();
   const insets = useSafeAreaInsets();
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const [videoError, setVideoError] = useState(false);
-  const [activeFilter, setActiveFilter] = useState('All');
+
+  // Live stream player state
+  const liveVideoRef = useRef<Video>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [liveMuted, setLiveMuted] = useState(false);
+  const [livePlaying, setLivePlaying] = useState(true);
+  const [liveControlsVisible, setLiveControlsVisible] = useState(true);
+  const liveControlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const creamBg = isDark ? colors.background : '#FAF7F2';
   const inkColor = isDark ? colors.foreground : '#1A1714';
   const cardBg = isDark ? colors.card : '#FFFFFF';
   const borderColor = isDark ? colors.border : 'rgba(26,23,20,0.07)';
 
-  const featured = PAST_SERVICES[0];
-  const pastVideos = PAST_SERVICES.slice(1);
+  // ── Live stream controls ──
+  const resetLiveControlsTimer = useCallback(() => {
+    setLiveControlsVisible(true);
+    if (liveControlsTimerRef.current) clearTimeout(liveControlsTimerRef.current);
+    liveControlsTimerRef.current = setTimeout(() => setLiveControlsVisible(false), 3000);
+  }, []);
+
+  const enterFullscreen = useCallback(async () => {
+    StatusBar.setHidden(true, 'fade');
+    await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
+    setIsFullscreen(true);
+    resetLiveControlsTimer();
+  }, [resetLiveControlsTimer]);
+
+  const exitFullscreen = useCallback(async () => {
+    StatusBar.setHidden(false, 'fade');
+    await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+    setIsFullscreen(false);
+  }, []);
+
+  // Android back button exits fullscreen first
+  useEffect(() => {
+    const handler = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (isFullscreen) {
+        exitFullscreen();
+        return true;
+      }
+      return false;
+    });
+    return () => handler.remove();
+  }, [isFullscreen, exitFullscreen]);
+
+  // Restore portrait on unmount
+  useEffect(() => {
+    return () => {
+      StatusBar.setHidden(false, 'fade');
+      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+    };
+  }, []);
+
+  const toggleLivePlayPause = useCallback(async () => {
+    if (livePlaying) {
+      await liveVideoRef.current?.pauseAsync();
+    } else {
+      await liveVideoRef.current?.playAsync();
+    }
+    setLivePlaying(!livePlaying);
+    resetLiveControlsTimer();
+  }, [livePlaying, resetLiveControlsTimer]);
+
+  function openRecording(recording: Recording) {
+    navigation.navigate('RecordingPlayer', { recording });
+  }
+
+  const featured = recordings[0] ?? null;
+  const pastVideos = recordings.slice(1);
 
   return (
     <View style={{ flex: 1, backgroundColor: creamBg }}>
@@ -103,7 +126,7 @@ export function WatchScreen() {
         showsVerticalScrollIndicator={false}
       >
         {/* ── Header ── */}
-        <View
+        {!isFullscreen && <View
           style={{
             flexDirection: 'row',
             alignItems: 'center',
@@ -155,30 +178,18 @@ export function WatchScreen() {
             Watch
           </Text>
 
-          <Pressable
-            className="active:opacity-70"
-            style={{
-              width: 36,
-              height: 36,
-              borderRadius: 18,
-              backgroundColor: cardBg,
-              alignItems: 'center',
-              justifyContent: 'center',
-              shadowColor: '#000',
-              shadowOffset: { width: 0, height: 2 },
-              shadowOpacity: 0.07,
-              shadowRadius: 8,
-              elevation: 2,
-            }}
-          >
-            <Share2 size={16} color={WARM_GRAY} />
-          </Pressable>
-        </View>
+          {/* Spacer to keep title centered */}
+          <View style={{ width: 70 }} />
+        </View>}
 
         {/* ── Live Player / Offline State ── */}
-        <View style={{ marginHorizontal: 16, marginBottom: 0 }}>
+        <View style={isFullscreen ? { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 50, backgroundColor: '#000' } : { marginHorizontal: 16 }}>
           <View
-            style={{
+            style={isFullscreen ? {
+              width: screenWidth,
+              height: screenHeight,
+              backgroundColor: '#000',
+            } : {
               borderRadius: 24,
               overflow: 'hidden',
               aspectRatio: 16 / 9,
@@ -193,48 +204,159 @@ export function WatchScreen() {
             {status?.isLive && hlsUrl && !videoError ? (
               <>
                 <Video
+                  ref={liveVideoRef}
                   source={{ uri: hlsUrl }}
-                  shouldPlay
-                  isMuted={false}
+                  shouldPlay={livePlaying}
+                  isMuted={liveMuted}
                   resizeMode={ResizeMode.CONTAIN}
-                  useNativeControls
+                  useNativeControls={false}
                   style={StyleSheet.absoluteFill}
                   onError={() => setVideoError(true)}
                 />
-                {/* LIVE badge */}
-                <View style={{ position: 'absolute', top: 12, left: 14 }}>
-                  <View
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      backgroundColor: '#dc2626',
-                      borderRadius: 100,
-                      paddingHorizontal: 10,
-                      paddingVertical: 5,
-                    }}
-                  >
-                    <Radio size={10} color="#fff" />
-                    <Text
+
+                {/* Tap catcher to show/hide controls */}
+                <Pressable
+                  style={StyleSheet.absoluteFill}
+                  onPress={resetLiveControlsTimer}
+                />
+
+                {liveControlsVisible && (
+                  <>
+                    {/* LIVE badge — top-left */}
+                    <View style={{ position: 'absolute', top: 12, left: isFullscreen ? insets.left + 14 : 14 }}>
+                      <View
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          backgroundColor: '#dc2626',
+                          borderRadius: 100,
+                          paddingHorizontal: 10,
+                          paddingVertical: 5,
+                        }}
+                      >
+                        <Radio size={10} color="#fff" />
+                        <Text
+                          style={{
+                            fontFamily: 'OpenSans_700Bold',
+                            fontSize: 10,
+                            color: '#fff',
+                            marginLeft: 5,
+                          }}
+                        >
+                          LIVE
+                        </Text>
+                      </View>
+                    </View>
+
+                    {/* Center play/pause */}
+                    <Pressable
+                      onPress={toggleLivePlayPause}
                       style={{
-                        fontFamily: 'OpenSans_700Bold',
-                        fontSize: 10,
-                        color: '#fff',
-                        marginLeft: 5,
+                        position: 'absolute',
+                        top: '50%',
+                        left: '50%',
+                        transform: [{ translateX: -28 }, { translateY: -28 }],
+                        width: 56,
+                        height: 56,
+                        borderRadius: 28,
+                        backgroundColor: 'rgba(0,0,0,0.5)',
+                        alignItems: 'center',
+                        justifyContent: 'center',
                       }}
                     >
-                      LIVE
-                    </Text>
+                      {livePlaying
+                        ? <Pause size={28} color="#fff" />
+                        : <Play size={28} color="#fff" style={{ marginLeft: 3 }} />}
+                    </Pressable>
+
+                    {/* Bottom bar: mute + fullscreen */}
+                    <View
+                      style={{
+                        position: 'absolute',
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        paddingHorizontal: isFullscreen ? insets.left + 16 : 16,
+                        paddingBottom: 12,
+                        paddingTop: 8,
+                        backgroundColor: 'rgba(0,0,0,0.45)',
+                      }}
+                    >
+                      {/* Mute toggle */}
+                      <Pressable
+                        onPress={() => { setLiveMuted(m => !m); resetLiveControlsTimer(); }}
+                        style={{
+                          width: 40,
+                          height: 40,
+                          borderRadius: 20,
+                          backgroundColor: 'rgba(255,255,255,0.15)',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        {liveMuted
+                          ? <VolumeX size={18} color="#fff" />
+                          : <Volume2 size={18} color="#fff" />}
+                      </Pressable>
+
+                      {/* Fullscreen toggle */}
+                      <Pressable
+                        onPress={isFullscreen ? exitFullscreen : enterFullscreen}
+                        style={{
+                          width: 40,
+                          height: 40,
+                          borderRadius: 20,
+                          backgroundColor: 'rgba(255,255,255,0.15)',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        {isFullscreen
+                          ? <Minimize size={18} color="#fff" />
+                          : <Maximize size={18} color="#fff" />}
+                      </Pressable>
+                    </View>
+                  </>
+                )}
+
+                {/* LIVE badge always visible even when controls hidden */}
+                {!liveControlsVisible && (
+                  <View style={{ position: 'absolute', top: 12, left: isFullscreen ? insets.left + 14 : 14 }}>
+                    <View
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        backgroundColor: '#dc2626',
+                        borderRadius: 100,
+                        paddingHorizontal: 10,
+                        paddingVertical: 5,
+                      }}
+                    >
+                      <Radio size={10} color="#fff" />
+                      <Text
+                        style={{
+                          fontFamily: 'OpenSans_700Bold',
+                          fontSize: 10,
+                          color: '#fff',
+                          marginLeft: 5,
+                        }}
+                      >
+                        LIVE
+                      </Text>
+                    </View>
                   </View>
-                </View>
+                )}
               </>
             ) : (
               <LinearGradient
                 colors={['#1A1209', '#3D2B0E', '#5C3D15']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
-                style={[StyleSheet.absoluteFill]}
+                style={StyleSheet.absoluteFill}
               >
-                {/* Center play ring */}
                 <View
                   style={{
                     flex: 1,
@@ -269,7 +391,6 @@ export function WatchScreen() {
                   </Text>
                 </View>
 
-                {/* Next service ribbon */}
                 <LinearGradient
                   colors={['transparent', 'rgba(13,10,7,0.95)']}
                   style={{
@@ -339,370 +460,383 @@ export function WatchScreen() {
           </View>
         </View>
 
-        {/* ── Series Filter ── */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{ paddingHorizontal: 16, gap: 8, paddingTop: 22, paddingBottom: 16 }}
-        >
-          {SERIES_FILTERS.map((f) => {
-            const isActive = activeFilter === f;
-            return (
-              <Pressable
-                key={f}
-                onPress={() => setActiveFilter(f)}
-                className="active:opacity-80"
-                style={{
-                  paddingVertical: 8,
-                  paddingHorizontal: 16,
-                  borderRadius: 100,
-                  borderWidth: 1.5,
-                  borderColor: isActive ? inkColor : borderColor,
-                  backgroundColor: isActive ? inkColor : cardBg,
-                  shadowColor: '#000',
-                  shadowOffset: { width: 0, height: 1 },
-                  shadowOpacity: 0.05,
-                  shadowRadius: 6,
-                  elevation: 1,
-                }}
-              >
-                <Text
-                  style={{
-                    fontFamily: 'OpenSans_600SemiBold',
-                    fontSize: 13,
-                    color: isActive ? '#fff' : WARM_GRAY,
-                  }}
-                >
-                  {f}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-
-        {/* ── Featured Video ── */}
-        <View style={{ paddingHorizontal: 16, marginBottom: 22 }}>
-          <Pressable className="active:opacity-90">
-            <View
+        {/* ── Loading State ── */}
+        {!isFullscreen && loading && (
+          <View style={{ alignItems: 'center', paddingTop: 60 }}>
+            <ActivityIndicator color={GOLD} size="large" />
+            <Text
               style={{
-                borderRadius: 22,
-                overflow: 'hidden',
-                aspectRatio: 16 / 9,
-                shadowColor: '#000',
-                shadowOffset: { width: 0, height: 6 },
-                shadowOpacity: 0.14,
-                shadowRadius: 24,
-                elevation: 5,
+                fontFamily: 'OpenSans_400Regular',
+                fontSize: 13,
+                color: WARM_GRAY,
+                marginTop: 12,
               }}
             >
-              <LinearGradient
-                colors={[featured.gradientColors[0], featured.gradientColors[1]]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={StyleSheet.absoluteFill}
-              />
+              Loading sermons...
+            </Text>
+          </View>
+        )}
 
-              {/* Bottom overlay */}
-              <LinearGradient
-                colors={['transparent', 'rgba(13,10,7,0.2)', 'rgba(13,10,7,0.92)']}
-                locations={[0, 0.5, 1]}
-                style={[
-                  StyleSheet.absoluteFill,
-                  { justifyContent: 'flex-end', padding: 18 },
-                ]}
-              >
-                {/* Tag */}
-                <View
-                  style={{
-                    alignSelf: 'flex-start',
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    backgroundColor: GOLD,
-                    borderRadius: 100,
-                    paddingVertical: 4,
-                    paddingHorizontal: 10,
-                    marginBottom: 8,
-                  }}
-                >
-                  <Play size={8} color="#1A1714" fill="#1A1714" style={{ marginRight: 4 }} />
-                  <Text
-                    style={{
-                      fontFamily: 'OpenSans_700Bold',
-                      fontSize: 10,
-                      letterSpacing: 1,
-                      textTransform: 'uppercase',
-                      color: '#1A1714',
-                    }}
-                  >
-                    Latest Sermon
-                  </Text>
-                </View>
+        {/* ── Error State ── */}
+        {!isFullscreen && !loading && error && (
+          <View style={{ alignItems: 'center', paddingTop: 60 }}>
+            <Text
+              style={{
+                fontFamily: 'OpenSans_600SemiBold',
+                fontSize: 14,
+                color: WARM_GRAY,
+              }}
+            >
+              {error}
+            </Text>
+          </View>
+        )}
 
-                <Text
-                  style={{
-                    fontFamily: 'PlayfairDisplay_700Bold',
-                    fontSize: 22,
-                    color: '#fff',
-                    letterSpacing: -0.4,
-                    lineHeight: 26,
-                    marginBottom: 5,
-                  }}
-                >
-                  {featured.title}
-                </Text>
-
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <Text
-                    style={{
-                      fontFamily: 'OpenSans_400Regular',
-                      fontSize: 12,
-                      color: 'rgba(255,255,255,0.55)',
-                    }}
-                  >
-                    {featured.speaker}
-                  </Text>
-                  <View
-                    style={{
-                      width: 3,
-                      height: 3,
-                      borderRadius: 1.5,
-                      backgroundColor: 'rgba(255,255,255,0.3)',
-                      marginHorizontal: 6,
-                    }}
-                  />
-                  <Text
-                    style={{
-                      fontFamily: 'OpenSans_400Regular',
-                      fontSize: 12,
-                      color: 'rgba(255,255,255,0.55)',
-                    }}
-                  >
-                    {featured.duration}
-                  </Text>
-                  <View
-                    style={{
-                      width: 3,
-                      height: 3,
-                      borderRadius: 1.5,
-                      backgroundColor: 'rgba(255,255,255,0.3)',
-                      marginHorizontal: 6,
-                    }}
-                  />
-                  <Text
-                    style={{
-                      fontFamily: 'OpenSans_400Regular',
-                      fontSize: 12,
-                      color: 'rgba(255,255,255,0.55)',
-                    }}
-                  >
-                    {featured.date}
-                  </Text>
-                </View>
-              </LinearGradient>
-
-              {/* Glass play button */}
+        {/* ── Featured Video ── */}
+        {!isFullscreen && !loading && featured && (
+          <View style={{ paddingHorizontal: 16, marginTop: 22, marginBottom: 22 }}>
+            <Pressable onPress={() => openRecording(featured)} className="active:opacity-90">
               <View
                 style={{
-                  position: 'absolute',
-                  top: 16,
-                  right: 16,
-                  width: 44,
-                  height: 44,
                   borderRadius: 22,
-                  backgroundColor: 'rgba(255,255,255,0.15)',
-                  borderWidth: 1,
-                  borderColor: 'rgba(255,255,255,0.25)',
+                  overflow: 'hidden',
+                  aspectRatio: 16 / 9,
+                  backgroundColor: '#1A1209',
+                  shadowColor: '#000',
+                  shadowOffset: { width: 0, height: 6 },
+                  shadowOpacity: 0.14,
+                  shadowRadius: 24,
+                  elevation: 5,
+                }}
+              >
+                {featured.thumbnailUrl ? (
+                  <Image
+                    source={{ uri: featured.thumbnailUrl }}
+                    style={StyleSheet.absoluteFill}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <LinearGradient
+                    colors={['#2D1B69', '#5B3FAF']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={StyleSheet.absoluteFill}
+                  />
+                )}
+
+                {/* Bottom overlay */}
+                <LinearGradient
+                  colors={['transparent', 'rgba(13,10,7,0.2)', 'rgba(13,10,7,0.92)']}
+                  locations={[0, 0.5, 1]}
+                  style={[StyleSheet.absoluteFill, { justifyContent: 'flex-end', padding: 18 }]}
+                >
+                  <View
+                    style={{
+                      alignSelf: 'flex-start',
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      backgroundColor: GOLD,
+                      borderRadius: 100,
+                      paddingVertical: 4,
+                      paddingHorizontal: 10,
+                      marginBottom: 8,
+                    }}
+                  >
+                    <Play size={8} color="#1A1714" fill="#1A1714" style={{ marginRight: 4 }} />
+                    <Text
+                      style={{
+                        fontFamily: 'OpenSans_700Bold',
+                        fontSize: 10,
+                        letterSpacing: 1,
+                        textTransform: 'uppercase',
+                        color: '#1A1714',
+                      }}
+                    >
+                      Latest Sermon
+                    </Text>
+                  </View>
+
+                  <Text
+                    numberOfLines={2}
+                    style={{
+                      fontFamily: 'PlayfairDisplay_700Bold',
+                      fontSize: 22,
+                      color: '#fff',
+                      letterSpacing: -0.4,
+                      lineHeight: 26,
+                      marginBottom: 5,
+                    }}
+                  >
+                    {featured.title}
+                  </Text>
+
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    {featured.duration > 0 && (
+                      <Text
+                        style={{
+                          fontFamily: 'OpenSans_400Regular',
+                          fontSize: 12,
+                          color: 'rgba(255,255,255,0.55)',
+                        }}
+                      >
+                        {formatDuration(featured.duration)}
+                      </Text>
+                    )}
+                    {featured.duration > 0 && featured.streamStartedAt && (
+                      <View
+                        style={{
+                          width: 3,
+                          height: 3,
+                          borderRadius: 1.5,
+                          backgroundColor: 'rgba(255,255,255,0.3)',
+                          marginHorizontal: 6,
+                        }}
+                      />
+                    )}
+                    {featured.streamStartedAt && (
+                      <Text
+                        style={{
+                          fontFamily: 'OpenSans_400Regular',
+                          fontSize: 12,
+                          color: 'rgba(255,255,255,0.55)',
+                        }}
+                      >
+                        {formatDate(featured.streamStartedAt)}
+                      </Text>
+                    )}
+                  </View>
+                </LinearGradient>
+
+                {/* Glass play button */}
+                <View
+                  style={{
+                    position: 'absolute',
+                    top: 16,
+                    right: 16,
+                    width: 44,
+                    height: 44,
+                    borderRadius: 22,
+                    backgroundColor: 'rgba(255,255,255,0.15)',
+                    borderWidth: 1,
+                    borderColor: 'rgba(255,255,255,0.25)',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Play size={18} color="#fff" fill="#fff" />
+                </View>
+              </View>
+            </Pressable>
+          </View>
+        )}
+
+        {/* ── Past Services ── */}
+        {!isFullscreen && !loading && pastVideos.length > 0 && (
+          <>
+            <View
+              style={{
+                paddingHorizontal: 20,
+                marginBottom: 12,
+              }}
+            >
+              <Text
+                style={{
+                  fontFamily: 'OpenSans_700Bold',
+                  fontSize: 11,
+                  letterSpacing: 1.8,
+                  textTransform: 'uppercase',
+                  color: WARM_GRAY,
+                }}
+              >
+                Past Services
+              </Text>
+            </View>
+
+            <View style={{ paddingHorizontal: 16, gap: 10 }}>
+              {pastVideos.map((video) => (
+                <Pressable
+                  key={video.id}
+                  onPress={() => openRecording(video)}
+                  className="active:opacity-80"
+                  style={{
+                    backgroundColor: cardBg,
+                    borderRadius: 18,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    padding: 12,
+                    paddingRight: 14,
+                    shadowColor: '#000',
+                    shadowOffset: { width: 0, height: 2 },
+                    shadowOpacity: 0.06,
+                    shadowRadius: 10,
+                    elevation: 2,
+                  }}
+                >
+                  {/* Thumbnail */}
+                  <View
+                    style={{
+                      width: 80,
+                      height: 56,
+                      borderRadius: 12,
+                      overflow: 'hidden',
+                      marginRight: 14,
+                      backgroundColor: '#1A1209',
+                    }}
+                  >
+                    {video.thumbnailUrl ? (
+                      <Image
+                        source={{ uri: video.thumbnailUrl }}
+                        style={{ width: '100%', height: '100%' }}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <LinearGradient
+                        colors={['#2D1B69', '#5B3FAF']}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={StyleSheet.absoluteFill}
+                      />
+                    )}
+                    <View
+                      style={[
+                        StyleSheet.absoluteFill,
+                        {
+                          backgroundColor: 'rgba(0,0,0,0.2)',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        },
+                      ]}
+                    >
+                      <View
+                        style={{
+                          width: 26,
+                          height: 26,
+                          borderRadius: 13,
+                          backgroundColor: 'rgba(255,255,255,0.9)',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <Play size={10} color="#1A1714" fill="#1A1714" style={{ marginLeft: 1 }} />
+                      </View>
+                    </View>
+                  </View>
+
+                  {/* Info */}
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text
+                      numberOfLines={2}
+                      style={{
+                        fontFamily: 'OpenSans_700Bold',
+                        fontSize: 13,
+                        color: inkColor,
+                        lineHeight: 18,
+                        marginBottom: 4,
+                      }}
+                    >
+                      {video.title}
+                    </Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+                      {video.streamStartedAt && (
+                        <Text
+                          style={{
+                            fontFamily: 'OpenSans_400Regular',
+                            fontSize: 11.5,
+                            color: WARM_GRAY,
+                          }}
+                        >
+                          {formatDate(video.streamStartedAt)}
+                        </Text>
+                      )}
+                      {video.streamStartedAt && video.duration > 0 && (
+                        <View
+                          style={{
+                            width: 3,
+                            height: 3,
+                            borderRadius: 1.5,
+                            backgroundColor: WARM_GRAY,
+                            opacity: 0.4,
+                          }}
+                        />
+                      )}
+                      {video.duration > 0 && (
+                        <Text
+                          style={{
+                            fontFamily: 'OpenSans_400Regular',
+                            fontSize: 11.5,
+                            color: WARM_GRAY,
+                          }}
+                        >
+                          {formatDuration(video.duration)}
+                        </Text>
+                      )}
+                    </View>
+                  </View>
+                </Pressable>
+              ))}
+            </View>
+
+            {/* ── Load More ── */}
+            {hasMore && (
+              <Pressable
+                onPress={loadMore}
+                disabled={loadingMore}
+                className="active:opacity-80"
+                style={{
+                  marginHorizontal: 16,
+                  marginTop: 16,
+                  paddingVertical: 14,
+                  borderRadius: 14,
+                  borderWidth: 1.5,
+                  borderColor: borderColor,
+                  backgroundColor: cardBg,
                   alignItems: 'center',
                   justifyContent: 'center',
                 }}
               >
-                <Play size={18} color="#fff" fill="#fff" />
-              </View>
-            </View>
-          </Pressable>
-        </View>
+                {loadingMore ? (
+                  <ActivityIndicator color={GOLD} size="small" />
+                ) : (
+                  <Text
+                    style={{
+                      fontFamily: 'OpenSans_600SemiBold',
+                      fontSize: 14,
+                      color: GOLD,
+                    }}
+                  >
+                    Load More
+                  </Text>
+                )}
+              </Pressable>
+            )}
+          </>
+        )}
 
-        {/* ── Past Services ── */}
-        <View
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            paddingHorizontal: 20,
-            marginBottom: 12,
-          }}
-        >
-          <Text
-            style={{
-              fontFamily: 'OpenSans_700Bold',
-              fontSize: 11,
-              letterSpacing: 1.8,
-              textTransform: 'uppercase',
-              color: WARM_GRAY,
-            }}
-          >
-            Past Services
-          </Text>
-          <Pressable className="active:opacity-70">
+        {/* ── Empty State ── */}
+        {!isFullscreen && !loading && !error && recordings.length === 0 && (
+          <View style={{ alignItems: 'center', paddingTop: 60, paddingHorizontal: 32 }}>
             <Text
-              style={{ fontFamily: 'OpenSans_600SemiBold', fontSize: 12, color: GOLD }}
-            >
-              See all
-            </Text>
-          </Pressable>
-        </View>
-
-        <View style={{ paddingHorizontal: 16, gap: 10 }}>
-          {pastVideos.map((video) => (
-            <Pressable
-              key={video.id}
-              className="active:opacity-80"
               style={{
-                backgroundColor: cardBg,
-                borderRadius: 18,
-                flexDirection: 'row',
-                alignItems: 'center',
-                padding: 12,
-                paddingRight: 14,
-                shadowColor: '#000',
-                shadowOffset: { width: 0, height: 2 },
-                shadowOpacity: 0.06,
-                shadowRadius: 10,
-                elevation: 2,
+                fontFamily: 'PlayfairDisplay_700Bold',
+                fontSize: 18,
+                color: inkColor,
+                marginBottom: 8,
               }}
             >
-              {/* Gradient thumbnail */}
-              <View
-                style={{
-                  width: 80,
-                  height: 56,
-                  borderRadius: 12,
-                  overflow: 'hidden',
-                  marginRight: 14,
-                }}
-              >
-                <LinearGradient
-                  colors={[video.gradientColors[0], video.gradientColors[1]]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={StyleSheet.absoluteFill}
-                />
-                {/* Play overlay */}
-                <View
-                  style={[
-                    StyleSheet.absoluteFill,
-                    {
-                      backgroundColor: 'rgba(0,0,0,0.25)',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    },
-                  ]}
-                >
-                  <View
-                    style={{
-                      width: 26,
-                      height: 26,
-                      borderRadius: 13,
-                      backgroundColor: 'rgba(255,255,255,0.9)',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                  >
-                    <Play size={10} color="#1A1714" fill="#1A1714" style={{ marginLeft: 1 }} />
-                  </View>
-                </View>
-              </View>
-
-              {/* Info */}
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text
-                  numberOfLines={1}
-                  style={{
-                    fontFamily: 'OpenSans_700Bold',
-                    fontSize: 14,
-                    color: inkColor,
-                    lineHeight: 18,
-                    marginBottom: 3,
-                  }}
-                >
-                  {video.title}
-                </Text>
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <Text
-                    style={{
-                      fontFamily: 'OpenSans_400Regular',
-                      fontSize: 11.5,
-                      color: WARM_GRAY,
-                    }}
-                  >
-                    {video.speaker}
-                  </Text>
-                  <View
-                    style={{
-                      width: 3,
-                      height: 3,
-                      borderRadius: 1.5,
-                      backgroundColor: WARM_GRAY,
-                      opacity: 0.4,
-                      marginHorizontal: 5,
-                    }}
-                  />
-                  <Text
-                    style={{
-                      fontFamily: 'OpenSans_400Regular',
-                      fontSize: 11.5,
-                      color: WARM_GRAY,
-                    }}
-                  >
-                    {video.duration}
-                  </Text>
-                </View>
-                {/* Series tag */}
-                <View
-                  style={{
-                    alignSelf: 'flex-start',
-                    backgroundColor: video.seriesBg,
-                    paddingHorizontal: 8,
-                    paddingVertical: 2,
-                    borderRadius: 100,
-                    marginTop: 5,
-                  }}
-                >
-                  <Text
-                    style={{
-                      fontFamily: 'OpenSans_700Bold',
-                      fontSize: 10,
-                      color: video.seriesColor,
-                    }}
-                  >
-                    {video.series}
-                  </Text>
-                </View>
-              </View>
-
-              {/* Duration badge */}
-              <View
-                style={{
-                  backgroundColor: isDark ? colors.muted : '#F0EBE3',
-                  borderRadius: 8,
-                  paddingVertical: 4,
-                  paddingHorizontal: 8,
-                  marginLeft: 8,
-                }}
-              >
-                <Text
-                  style={{
-                    fontFamily: 'OpenSans_700Bold',
-                    fontSize: 11,
-                    color: WARM_GRAY,
-                  }}
-                >
-                  {video.duration.split(' ')[0]}m
-                </Text>
-              </View>
-            </Pressable>
-          ))}
-        </View>
+              No Past Services
+            </Text>
+            <Text
+              style={{
+                fontFamily: 'OpenSans_400Regular',
+                fontSize: 14,
+                color: WARM_GRAY,
+                textAlign: 'center',
+              }}
+            >
+              Check back after our next service.
+            </Text>
+          </View>
+        )}
       </ScrollView>
     </View>
   );

@@ -10,8 +10,9 @@ const config = getDefaultConfig(projectRoot);
 // Watch all monorepo files
 config.watchFolders = [monorepoRoot];
 
-// Resolve packages from monorepo root first
+// Resolve packages from both workspace and monorepo root
 config.resolver.nodeModulesPaths = [
+  path.resolve(projectRoot, 'node_modules'),
   path.resolve(monorepoRoot, 'node_modules'),
 ];
 

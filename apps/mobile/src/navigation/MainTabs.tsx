@@ -8,6 +8,7 @@ import { EventsScreen } from '../screens/events/EventsScreen';
 import { EventDetailScreen } from '../screens/events/EventDetailScreen';
 import { AddEventScreen } from '../screens/events/AddEventScreen';
 import { WatchScreen } from '../screens/watch/WatchScreen';
+import { RecordingPlayerScreen } from '../screens/watch/RecordingPlayerScreen';
 import { GroupsScreen } from '../screens/groups/GroupsScreen';
 import { GroupDetailScreen } from '../screens/groups/GroupDetailScreen';
 import { GivingScreen } from '../screens/giving/GivingScreen';
@@ -51,7 +52,7 @@ function HomeStackScreen() {
         }}
       />
       <HomeStack.Screen name="Announcements" component={AnnouncementsScreen} />
-      <HomeStack.Screen name="Bible" component={BibleScreen} />
+      <HomeStack.Screen name="Bible" component={BibleScreen} options={{ headerShown: false }} />
       <HomeStack.Screen name="Location" component={LocationScreen} options={{ title: 'Our Location' }} />
       <HomeStack.Screen name="PrayerRequest" component={PrayerRequestScreen} options={{ title: 'Prayer Request' }} />
       <HomeStack.Screen name="Connect" component={ConnectScreen} options={{ title: 'Connect Nights' }} />
@@ -125,13 +126,14 @@ function MoreStackScreen() {
       }}
     >
       <MoreStack.Screen name="MoreMenu" component={MoreMenuScreen} options={{ headerShown: false }} />
-      <MoreStack.Screen name="Bible" component={BibleScreen} />
+      <MoreStack.Screen name="Bible" component={BibleScreen} options={{ headerShown: false }} />
       <MoreStack.Screen name="PrayerRequest" component={PrayerRequestScreen} options={{ title: 'Prayer Request' }} />
       <MoreStack.Screen name="Location" component={LocationScreen} options={{ title: 'Our Location' }} />
       <MoreStack.Screen name="Connect" component={ConnectScreen} options={{ title: 'Connect Nights' }} />
       <MoreStack.Screen name="Announcements" component={AnnouncementsScreen} />
       <MoreStack.Screen name="Giving" component={GivingScreen} options={{ headerShown: false }} />
-      <MoreStack.Screen name="Watch" component={WatchScreen} options={{ title: 'Watch' }} />
+      <MoreStack.Screen name="Watch" component={WatchScreen} options={{ headerShown: false }} />
+      <MoreStack.Screen name="RecordingPlayer" component={RecordingPlayerScreen} options={{ headerShown: false }} />
       <MoreStack.Screen name="ProfileScreen" component={ProfileScreen} options={{ title: 'Profile' }} />
       <MoreStack.Screen name="DMList" component={DMListScreen} options={{ title: 'Messages' }} />
       <MoreStack.Screen name="DMChat" component={DMChatScreen} options={{ title: 'Message' }} />

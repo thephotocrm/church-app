@@ -31,11 +31,15 @@ async function prayerFetch<T>(path: string, options: RequestInit = {}): Promise<
   });
 
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.message || body.error || `Request failed: ${res.status}`);
+    const errBody = await res.text();
+    let parsed: any = {};
+    try { parsed = JSON.parse(errBody); } catch {}
+    throw new Error(parsed.message || parsed.error || `Request failed: ${res.status}`);
   }
 
-  return res.json();
+  const text = await res.text();
+  if (!text) return undefined as T;
+  return JSON.parse(text) as T;
 }
 
 export async function getPrayerRequests(
@@ -59,5 +63,12 @@ export async function createPrayerRequest(
 export async function prayForRequest(id: string): Promise<{ prayerCount: number }> {
   return prayerFetch<{ prayerCount: number }>(`/${id}/pray`, {
     method: 'POST',
+  });
+}
+
+export async function deletePrayerRequest(id: string, token: string): Promise<void> {
+  return prayerFetch<void>(`/${id}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
   });
 }

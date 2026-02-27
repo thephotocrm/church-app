@@ -1,4 +1,4 @@
-import type { User, UserStatus, Event, EventDetail, EventCategory, RsvpStatus } from '@church-app/shared';
+import type { User, UserStatus, Event, EventDetail, EventCategory, RsvpStatus, RecordingsResponse } from '@church-app/shared';
 import type {
   GroupResponse,
   GroupMemberResponse,
@@ -98,6 +98,10 @@ export const api = {
     request<{ data: any[]; total: number }>(`/sermons?page=${page}`, {
       ...(token ? { headers: authHeaders(token) } : {}),
     }),
+
+  // Recordings (public)
+  getRecordings: (limit = 12, offset = 0) =>
+    request<RecordingsResponse>(`/recordings?limit=${limit}&offset=${offset}`),
 
   // Events (public)
   getEvents: (params?: { startDate?: string; endDate?: string; category?: EventCategory; featured?: boolean; limit?: number; offset?: number }) =>

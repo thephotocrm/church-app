@@ -3,42 +3,12 @@ import { View, Text, Pressable, ScrollView, StyleSheet, Image } from 'react-nati
 import { Video, ResizeMode } from 'expo-av';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Play, MapPin, Radio, Users, Calendar, ChevronRight } from 'lucide-react-native';
+import { Play, MapPin, Radio, Users, Calendar, ChevronRight, Volume2, VolumeX, Maximize } from 'lucide-react-native';
 import { useTheme } from '../../lib/useTheme';
 import { useStreamStatus } from '../../hooks/useStreamStatus';
+import { useRecordings } from '../../hooks/useRecordings';
+import type { Recording } from '@church-app/shared';
 
-const RECENT_SERVICES = [
-  {
-    id: '1',
-    title: 'Sunday Prayer',
-    speaker: 'Pastor Johnson',
-    duration: '1 hr 30 min',
-    tag: 'Worship',
-    tagColor: '#7C3AED',
-
-    image: 'https://images.unsplash.com/photo-1438232992991-995b7058bbb3?w=400&q=80',
-  },
-  {
-    id: '2',
-    title: 'The Power of Prayer',
-    speaker: 'Pastor Johnson',
-    duration: '52 min',
-    tag: 'Sermon',
-    tagColor: '#059669',
-
-    image: 'https://images.unsplash.com/photo-1509021436665-8f07dbf5bf1d?w=400&q=80',
-  },
-  {
-    id: '3',
-    title: 'Grace That Transforms',
-    speaker: 'Rev. Williams',
-    duration: '38 min',
-    tag: 'Bible Study',
-    tagColor: '#92400E',
-
-    image: 'https://images.unsplash.com/photo-1504052434569-70ad5836ab65?w=400&q=80',
-  },
-];
 
 const DAILY_VERSES = [
   { text: 'Be still, and know that I am God.', ref: 'Psalm 46:10' },
@@ -132,24 +102,37 @@ const QUICK_ACTIONS = [
   { key: 'events', icon: Calendar, label: 'Events', bg: '#7C3AED' },
 ] as const;
 
+// ── Helpers ──
+function formatDuration(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
 // ── Video Card ──
 interface VideoCardProps {
   title: string;
   duration: string;
-  tag: string;
-  tagColor: string;
-  image: string;
+  date: string;
+  image: string | null;
+  cardBg: string;
+  inkColor: string;
   onPress: () => void;
 }
 
-function VideoCard({ title, duration, tag, tagColor, image, onPress }: VideoCardProps) {
+function VideoCard({ title, duration, date, image, cardBg, inkColor, onPress }: VideoCardProps) {
   return (
     <Pressable
       onPress={onPress}
       className="active:opacity-80"
       style={{
         width: 200,
-        backgroundColor: '#fff',
+        backgroundColor: cardBg,
         borderRadius: 18,
         marginRight: 14,
         shadowColor: '#000',
@@ -168,11 +151,18 @@ function VideoCard({ title, duration, tag, tagColor, image, onPress }: VideoCard
           overflow: 'hidden',
         }}
       >
-        <Image
-          source={{ uri: image }}
-          style={StyleSheet.absoluteFill}
-          resizeMode="cover"
-        />
+        {image ? (
+          <Image
+            source={{ uri: image }}
+            style={StyleSheet.absoluteFill}
+            resizeMode="cover"
+          />
+        ) : (
+          <LinearGradient
+            colors={['#1b294b', '#2a3f6e']}
+            style={StyleSheet.absoluteFill}
+          />
+        )}
         {/* Dark scrim for play button contrast */}
         <View
           style={[
@@ -199,7 +189,7 @@ function VideoCard({ title, duration, tag, tagColor, image, onPress }: VideoCard
       <View style={{ padding: 12 }}>
         <Text
           numberOfLines={1}
-          style={{ fontFamily: 'OpenSans_700Bold', fontSize: 14, color: '#1A1714' }}
+          style={{ fontFamily: 'OpenSans_700Bold', fontSize: 14, color: inkColor }}
         >
           {title}
         </Text>
@@ -207,18 +197,9 @@ function VideoCard({ title, duration, tag, tagColor, image, onPress }: VideoCard
           <Text style={{ fontFamily: 'OpenSans_400Regular', fontSize: 12, color: '#9ca3af' }}>
             {duration}
           </Text>
-          <View
-            style={{
-              backgroundColor: tagColor + '18',
-              paddingHorizontal: 8,
-              paddingVertical: 3,
-              borderRadius: 10,
-            }}
-          >
-            <Text style={{ fontFamily: 'OpenSans_600SemiBold', fontSize: 10, color: tagColor }}>
-              {tag}
-            </Text>
-          </View>
+          <Text style={{ fontFamily: 'OpenSans_600SemiBold', fontSize: 11, color: '#9ca3af' }}>
+            {date}
+          </Text>
         </View>
       </View>
     </Pressable>
@@ -229,8 +210,11 @@ export function HomeScreen({ navigation }: any) {
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const { status, hlsUrl } = useStreamStatus();
+  const { recordings } = useRecordings();
+  const recentRecordings = recordings.slice(0, 5);
   const [countdown, setCountdown] = useState('');
   const [videoError, setVideoError] = useState(false);
+  const [heroMuted, setHeroMuted] = useState(true);
   const [serviceLabel, setServiceLabel] = useState('');
 
   useEffect(() => {
@@ -336,15 +320,39 @@ export function HomeScreen({ navigation }: any) {
             }}
           >
             {status?.isLive && hlsUrl && !videoError ? (
-              <Video
-                source={{ uri: hlsUrl }}
-                shouldPlay
-                isMuted
-                resizeMode={ResizeMode.COVER}
-                useNativeControls={false}
-                style={[StyleSheet.absoluteFill, { borderRadius: 24 }]}
-                onError={() => setVideoError(true)}
-              />
+              <>
+                <Video
+                  source={{ uri: hlsUrl }}
+                  shouldPlay
+                  isMuted={heroMuted}
+                  resizeMode={ResizeMode.COVER}
+                  useNativeControls={false}
+                  style={[StyleSheet.absoluteFill, { borderRadius: 24 }]}
+                  onError={() => setVideoError(true)}
+                />
+                {/* Mute toggle — top-right */}
+                <Pressable
+                  onPress={() => setHeroMuted(m => !m)}
+                  style={{
+                    position: 'absolute',
+                    top: 12,
+                    right: 12,
+                    width: 36,
+                    height: 36,
+                    borderRadius: 18,
+                    backgroundColor: 'rgba(0,0,0,0.4)',
+                    borderWidth: 1,
+                    borderColor: 'rgba(255,255,255,0.2)',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: 10,
+                  }}
+                >
+                  {heroMuted
+                    ? <VolumeX size={16} color="#fff" />
+                    : <Volume2 size={16} color="#fff" />}
+                </Pressable>
+              </>
             ) : (
               <LinearGradient
                 colors={['#1A1209', '#3D2B0E', '#5C3D15']}
@@ -462,7 +470,7 @@ export function HomeScreen({ navigation }: any) {
                 </Text>
               </View>
 
-              {/* Gold play button */}
+              {/* Fullscreen / go-to-player button */}
               <Pressable
                 onPress={() => navigation.getParent()?.navigate('More', { screen: 'Watch' })}
                 style={{
@@ -474,7 +482,7 @@ export function HomeScreen({ navigation }: any) {
                   justifyContent: 'center',
                 }}
               >
-                <Play size={18} color="#fff" fill="#fff" />
+                <Maximize size={18} color="#fff" />
               </Pressable>
             </View>
           </Pressable>
@@ -645,41 +653,44 @@ export function HomeScreen({ navigation }: any) {
         </Pressable>
 
         {/* ── Recent Videos ── */}
-        <View style={{ marginTop: 28 }}>
-          <Text
-            style={{
-              fontFamily: 'OpenSans_700Bold',
-              fontSize: 11,
-              color: mutedLabel,
-              letterSpacing: 1.5,
-              textTransform: 'uppercase',
-              marginBottom: 14,
-              paddingHorizontal: 20,
-            }}
-          >
-            Recently Uploaded
-          </Text>
+        {recentRecordings.length > 0 && (
+          <View style={{ marginTop: 28 }}>
+            <Text
+              style={{
+                fontFamily: 'OpenSans_700Bold',
+                fontSize: 11,
+                color: mutedLabel,
+                letterSpacing: 1.5,
+                textTransform: 'uppercase',
+                marginBottom: 14,
+                paddingHorizontal: 20,
+              }}
+            >
+              Recently Uploaded
+            </Text>
 
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ paddingHorizontal: 20 }}
-          >
-            {RECENT_SERVICES.map((service) => (
-              <VideoCard
-                key={service.id}
-                title={service.title}
-                duration={service.duration}
-                tag={service.tag}
-                tagColor={service.tagColor}
-                image={service.image}
-                onPress={() =>
-                  navigation.getParent()?.navigate('More', { screen: 'Watch' })
-                }
-              />
-            ))}
-          </ScrollView>
-        </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingHorizontal: 20 }}
+            >
+              {recentRecordings.map((recording) => (
+                <VideoCard
+                  key={recording.id}
+                  title={recording.title}
+                  duration={formatDuration(recording.duration)}
+                  date={formatDate(recording.streamStartedAt)}
+                  image={recording.thumbnailUrl}
+                  cardBg={cardBg}
+                  inkColor={inkColor}
+                  onPress={() =>
+                    navigation.getParent()?.navigate('More', { screen: 'RecordingPlayer', params: { recording } })
+                  }
+                />
+              ))}
+            </ScrollView>
+          </View>
+        )}
       </ScrollView>
     </View>
   );

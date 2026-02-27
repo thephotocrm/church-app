@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,9 +10,14 @@ import {
   ScrollView,
   Platform,
   Pressable,
+  Animated,
+  PanResponder,
+  type NativeSyntheticEvent,
+  type TextLayoutEventData,
 } from 'react-native';
-import { Heart, Plus, Send } from 'lucide-react-native';
+import { Heart, Plus, Send, Trash2 } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
 import {
   Card,
   CardContent,
@@ -24,6 +29,7 @@ import {
   Input,
 } from '../../components/ui';
 import { useTheme } from '../../lib/useTheme';
+import { useAuth } from '../../contexts/AuthContext';
 import { usePrayerRequests } from '../../hooks/usePrayerRequests';
 import type { PrayerRequest, CreatePrayerRequestPayload } from '../../services/prayerApi';
 
@@ -34,47 +40,132 @@ function PrayerCard({
   item,
   onPray,
   prayingId,
+  isAdmin,
+  onDelete,
 }: {
   item: PrayerRequest;
   onPray: (id: string) => void;
   prayingId: string | null;
+  isAdmin?: boolean;
+  onDelete?: (id: string) => void;
 }) {
   const { colors } = useTheme();
+  const [expanded, setExpanded] = useState(false);
+  const [textTruncated, setTextTruncated] = useState(false);
+
+  // Swipe-to-delete animation
+  const translateX = useRef(new Animated.Value(0)).current;
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_evt, gs) =>
+        !!isAdmin && gs.dx < -10 && Math.abs(gs.dy) < 20,
+      onPanResponderMove: (_evt, gs) => {
+        if (gs.dx < 0) {
+          translateX.setValue(gs.dx);
+        }
+      },
+      onPanResponderRelease: (_evt, gs) => {
+        if (gs.dx < -60) {
+          Animated.spring(translateX, {
+            toValue: -80,
+            useNativeDriver: true,
+          }).start();
+        } else {
+          Animated.spring(translateX, {
+            toValue: 0,
+            useNativeDriver: true,
+          }).start();
+        }
+      },
+    }),
+  ).current;
+
+  const handleDeletePress = () => {
+    Alert.alert(
+      'Delete Prayer Request',
+      'Are you sure you want to remove this prayer request?',
+      [
+        { text: 'Cancel', style: 'cancel', onPress: () => {
+          Animated.spring(translateX, { toValue: 0, useNativeDriver: true }).start();
+        }},
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => onDelete?.(item.id),
+        },
+      ],
+    );
+  };
+
+  const handleTextLayout = (e: NativeSyntheticEvent<TextLayoutEventData>) => {
+    if (e.nativeEvent.lines.length >= 3) {
+      setTextTruncated(true);
+    }
+  };
 
   const displayName = item.isAnonymous ? 'Anonymous' : item.authorName || 'Anonymous';
   const timeAgo = formatRelativeTime(item.createdAt);
 
   return (
-    <Card className="mb-3">
-      <CardContent>
-        <View className="flex-row items-center justify-between mb-1">
-          <Text className="font-body-semibold text-sm text-muted-foreground">
-            {displayName}
-          </Text>
-          <Text className="font-body text-xs text-muted-foreground">{timeAgo}</Text>
-        </View>
-        <Text className="font-body-bold text-base text-foreground mb-1">{item.title}</Text>
-        <Text className="font-body text-sm text-muted-foreground" numberOfLines={3}>
-          {item.body}
-        </Text>
-      </CardContent>
-      <CardFooter>
-        <View className="flex-row items-center flex-1">
-          <Heart size={14} color={colors.mutedForeground} />
-          <Text className="font-body text-xs text-muted-foreground ml-1">
-            {item.prayerCount} {item.prayerCount === 1 ? 'prayer' : 'prayers'}
-          </Text>
-        </View>
+    <View className="mb-3 overflow-hidden rounded-xl">
+      {/* Delete panel behind card */}
+      {isAdmin && (
         <Pressable
-          onPress={() => onPray(item.id)}
-          disabled={prayingId === item.id}
-          className="flex-row items-center bg-accent/15 px-3 py-1.5 rounded-full active:opacity-70"
+          onPress={handleDeletePress}
+          className="absolute right-0 top-0 bottom-0 w-20 bg-destructive items-center justify-center rounded-r-xl"
         >
-          <Heart size={14} color={colors.accent} />
-          <Text className="font-body-bold text-xs text-accent ml-1">Pray</Text>
+          <Trash2 size={22} color="#ffffff" />
         </Pressable>
-      </CardFooter>
-    </Card>
+      )}
+
+      <Animated.View
+        style={{ transform: [{ translateX }] }}
+        {...(isAdmin ? panResponder.panHandlers : {})}
+      >
+        <Card>
+          <CardContent>
+            <View className="flex-row items-center justify-between mb-1">
+              <Text className="font-body-semibold text-sm text-muted-foreground">
+                {displayName}
+              </Text>
+              <Text className="font-body text-xs text-muted-foreground">{timeAgo}</Text>
+            </View>
+            <Text className="font-body-bold text-base text-foreground mb-1">{item.title}</Text>
+            <Text
+              className="font-body text-sm text-muted-foreground"
+              numberOfLines={expanded ? undefined : 3}
+              onTextLayout={handleTextLayout}
+            >
+              {item.body}
+            </Text>
+            {textTruncated && (
+              <Pressable onPress={() => setExpanded((v) => !v)} className="mt-1">
+                <Text className="font-body-semibold text-xs text-accent">
+                  {expanded ? 'Show less' : 'Read more'}
+                </Text>
+              </Pressable>
+            )}
+          </CardContent>
+          <CardFooter>
+            <View className="flex-row items-center flex-1">
+              <Heart size={14} color={colors.mutedForeground} />
+              <Text className="font-body text-xs text-muted-foreground ml-1">
+                {item.prayerCount} {item.prayerCount === 1 ? 'prayer' : 'prayers'}
+              </Text>
+            </View>
+            <Pressable
+              onPress={() => onPray(item.id)}
+              disabled={prayingId === item.id}
+              className="flex-row items-center bg-accent/15 px-3 py-1.5 rounded-full active:opacity-70"
+            >
+              <Heart size={14} color={colors.accent} />
+              <Text className="font-body-bold text-xs text-accent ml-1">Pray</Text>
+            </Pressable>
+          </CardFooter>
+        </Card>
+      </Animated.View>
+    </View>
   );
 }
 
@@ -85,10 +176,12 @@ function SubmitPrayerModal({
   visible,
   onClose,
   onSubmit,
+  prefillName,
 }: {
   visible: boolean;
   onClose: () => void;
   onSubmit: (payload: CreatePrayerRequestPayload) => Promise<void>;
+  prefillName?: string;
 }) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
@@ -97,6 +190,13 @@ function SubmitPrayerModal({
   const [authorName, setAuthorName] = useState('');
   const [isAnonymous, setIsAnonymous] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  // Pre-fill name when modal opens for authenticated users
+  useEffect(() => {
+    if (visible && prefillName) {
+      setAuthorName(prefillName);
+    }
+  }, [visible, prefillName]);
 
   const resetForm = () => {
     setTitle('');
@@ -202,14 +302,18 @@ function SubmitPrayerModal({
               />
             </View>
 
-            {!isAnonymous && (
+            {prefillName && !isAnonymous ? (
+              <Text className="font-body text-sm text-muted-foreground mb-4">
+                Submitting as <Text className="font-body-bold text-foreground">{prefillName}</Text>
+              </Text>
+            ) : !isAnonymous ? (
               <Input
                 label="Your Name"
                 placeholder="Enter your name"
                 value={authorName}
                 onChangeText={setAuthorName}
               />
-            )}
+            ) : null}
 
             <Button
               onPress={handleSubmit}
@@ -232,10 +336,14 @@ function SubmitPrayerModal({
 export function PrayerRequestScreen() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
-  const { requests, loading, refreshing, error, refresh, submitRequest, pray } =
+  const navigation = useNavigation<any>();
+  const { user, token, isAuthenticated } = useAuth();
+  const { requests, loading, refreshing, error, refresh, submitRequest, pray, deleteRequest } =
     usePrayerRequests();
   const [modalVisible, setModalVisible] = useState(false);
   const [prayingId, setPrayingId] = useState<string | null>(null);
+
+  const isAdmin = user?.role === 'admin' || user?.role === 'group_admin';
 
   const handlePray = async (id: string) => {
     setPrayingId(id);
@@ -248,8 +356,33 @@ export function PrayerRequestScreen() {
     }
   };
 
+  const handleDelete = async (id: string) => {
+    if (!token) return;
+    try {
+      await deleteRequest(id, token);
+    } catch (err) {
+      Alert.alert('Error', err instanceof Error ? err.message : 'Failed to delete prayer request.');
+    }
+  };
+
   const handleSubmit = async (payload: CreatePrayerRequestPayload) => {
     await submitRequest(payload);
+  };
+
+  const handleFabPress = () => {
+    if (isAuthenticated) {
+      setModalVisible(true);
+    } else {
+      Alert.alert(
+        'Submit Prayer Request',
+        'Would you like to log in or continue as a guest?',
+        [
+          { text: 'Log In', onPress: () => navigation.navigate('AuthModal') },
+          { text: 'Continue as Guest', onPress: () => setModalVisible(true) },
+          { text: 'Cancel', style: 'cancel' },
+        ],
+      );
+    }
   };
 
   // Initial loading state
@@ -277,7 +410,13 @@ export function PrayerRequestScreen() {
         data={requests}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
-          <PrayerCard item={item} onPray={handlePray} prayingId={prayingId} />
+          <PrayerCard
+            item={item}
+            onPray={handlePray}
+            prayingId={prayingId}
+            isAdmin={isAdmin}
+            onDelete={handleDelete}
+          />
         )}
         contentContainerStyle={{
           paddingHorizontal: 16,
@@ -299,9 +438,9 @@ export function PrayerRequestScreen() {
         }
       />
 
-      {/* Floating Action Button — sits above the floating tab bar (64px + bottom inset + spacing) */}
+      {/* Floating Action Button */}
       <Pressable
-        onPress={() => setModalVisible(true)}
+        onPress={handleFabPress}
         className="absolute right-5 w-14 h-14 rounded-full bg-accent items-center justify-center active:opacity-80"
         style={{
           bottom: Math.max(insets.bottom, 12) + 64 + 16,
@@ -319,6 +458,7 @@ export function PrayerRequestScreen() {
         visible={modalVisible}
         onClose={() => setModalVisible(false)}
         onSubmit={handleSubmit}
+        prefillName={isAuthenticated ? user?.name : undefined}
       />
     </View>
   );
